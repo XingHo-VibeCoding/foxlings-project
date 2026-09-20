@@ -1,0 +1,23 @@
+# ===== 密钥与配置：永不上传 =====
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+
+# ===== 依赖目录（有 package.json 就能随时重装）=====
+node_modules/
+
+# ===== 本地数据库文件 =====
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== 日志与临时文件 =====
+*.log
+tmp/
+.cache/
+
+# ===== 系统垃圾文件 =====
+Thumbs.db
+.DS_Store
