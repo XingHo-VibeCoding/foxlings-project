@@ -1,0 +1,62 @@
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI','Microsoft YaHei',sans-serif">
+  <rect width="760" height="420" fill="#f8f9fc"/>
+  <text x="380" y="34" text-anchor="middle" font-size="17" font-weight="bold" fill="#2a2f3c">数据流图 · 「热门时事真伪辨别网站」（路线 A · 无后端）</text>
+
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7" fill="none" stroke="#3b5bfd" stroke-width="1.6"/>
+    </marker>
+    <marker id="arrG" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7" fill="none" stroke="#18a058" stroke-width="1.6"/>
+    </marker>
+  </defs>
+
+  <!-- 泳道标签 -->
+  <text x="110" y="66" text-anchor="middle" font-size="12" font-weight="bold" fill="#8a92a6">① 数据从哪来（每日人工）</text>
+  <text x="392" y="66" text-anchor="middle" font-size="12" font-weight="bold" fill="#8a92a6">② 数据住在哪</text>
+  <text x="655" y="66" text-anchor="middle" font-size="12" font-weight="bold" fill="#8a92a6">③ 数据到哪去（只读）</text>
+
+  <!-- 数据来源 -->
+  <rect x="30" y="90" width="160" height="64" rx="10" fill="#fff" stroke="#e69913" stroke-width="2"/>
+  <text x="110" y="116" text-anchor="middle" font-size="13" font-weight="bold" fill="#2a2f3c">全网公开流传内容</text>
+  <text x="110" y="136" text-anchor="middle" font-size="10.5" fill="#6b7280">核查对象：帖子/短视频/截图</text>
+
+  <rect x="30" y="190" width="160" height="64" rx="10" fill="#fff" stroke="#e69913" stroke-width="2"/>
+  <text x="110" y="216" text-anchor="middle" font-size="13" font-weight="bold" fill="#2a2f3c">＋权威佐证信源</text>
+  <text x="110" y="236" text-anchor="middle" font-size="10.5" fill="#6b7280">官方通报/持牌媒体 → 人工整理</text>
+
+  <!-- data.json -->
+  <rect x="300" y="140" width="184" height="76" rx="10" fill="#eef1ff" stroke="#3b5bfd" stroke-width="2.5"/>
+  <text x="392" y="170" text-anchor="middle" font-size="14" font-weight="bold" fill="#3b5bfd">data.json</text>
+  <text x="392" y="190" text-anchor="middle" font-size="10.5" fill="#5b63a0">PRD 九字段 · 随 Git 版本管理</text>
+  <text x="392" y="205" text-anchor="middle" font-size="10.5" fill="#5b63a0">四榜由此实时过滤 · 不存四份</text>
+
+  <!-- GitHub Pages -->
+  <rect x="560" y="80" width="170" height="60" rx="10" fill="#fff" stroke="#3b5bfd" stroke-width="2"/>
+  <text x="645" y="105" text-anchor="middle" font-size="13" font-weight="bold" fill="#2a2f3c">GitHub Pages</text>
+  <text x="645" y="124" text-anchor="middle" font-size="10.5" fill="#6b7280">免费静态托管 · 推送即上线</text>
+
+  <!-- 浏览器 -->
+  <rect x="560" y="190" width="170" height="88" rx="10" fill="#e9f9ef" stroke="#18a058" stroke-width="2"/>
+  <text x="645" y="214" text-anchor="middle" font-size="13" font-weight="bold" fill="#0e7c43">用户浏览器（前端）</text>
+  <text x="645" y="234" text-anchor="middle" font-size="10.5" fill="#2f6e4d">拉取 data.json → 校验 → 渲染</text>
+  <text x="645" y="250" text-anchor="middle" font-size="10.5" fill="#2f6e4d">日/周/月/年档过滤 + 关键词检索</text>
+  <text x="645" y="266" text-anchor="middle" font-size="10.5" fill="#2f6e4d">全部在浏览器内完成</text>
+
+  <!-- 箭头 -->
+  <path d="M 110 154 L 110 190" stroke="#e69913" stroke-width="2" fill="none"/>
+  <path d="M 190 190 C 240 180, 250 180, 300 178" stroke="#3b5bfd" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+  <text x="245" y="168" text-anchor="middle" font-size="10" fill="#3b5bfd">人工写入</text>
+  <path d="M 484 170 C 516 165, 524 140, 558 118" stroke="#3b5bfd" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+  <text x="536" y="136" text-anchor="middle" font-size="10" fill="#3b5bfd">git push</text>
+  <path d="M 645 140 L 645 188" stroke="#18a058" stroke-width="2" fill="none" marker-end="url(#arrG)"/>
+  <text x="668" y="168" font-size="10" fill="#18a058">GET data.json</text>
+
+  <!-- 只读横幅 -->
+  <rect x="30" y="300" width="700" height="44" rx="10" fill="#fff8e8" stroke="#e69913" stroke-width="1.5"/>
+  <text x="380" y="322" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#8a6100">核心事实：全程只进不出、只读不写 —— 网站不收集任何用户数据，无上传通道，无服务器密钥</text>
+
+  <!-- 掌握题一句话 -->
+  <rect x="30" y="356" width="700" height="44" rx="10" fill="#eef1ff" stroke="#3b5bfd" stroke-width="1.5"/>
+  <text x="380" y="378" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2a3f8f">一句话：数据从全网公开流传内容与权威信源中来，经人工整理进 data.json，随 Git 上到 GitHub Pages，在用户浏览器里被读取、过滤、渲染。</text>
+</svg>
