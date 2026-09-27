@@ -3,10 +3,51 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>热门时事真伪辨别网站</title>
+  <title>热门时事真伪辨别 · 首页</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <h1>热门时事真伪辨别网站</h1>
-  <p>这是项目的占位页（placeholder）。真正的功能将从 Day 7 的 MVP 开始开发。</p>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title">🔍 热门时事真伪辨别</h1>
+      <p class="site-slogan">证据整理员，不是审判官 —— 每个结论都有信源可查</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 视图切换：卡片流（默认） / 辟谣榜 -->
+    <nav class="view-tabs" id="view-tabs">
+      <button class="tab active" data-view="feed">热点卡片流</button>
+      <button class="tab" data-view="board">辟谣榜</button>
+    </nav>
+
+    <!-- 视图一：热点卡片流 -->
+    <section id="view-feed" class="view active" aria-label="热点卡片流">
+      <div id="card-list" class="card-list"></div>
+    </section>
+
+    <!-- 视图二：辟谣榜（日/周/月/年 + 检索，第 3 步实现） -->
+    <section id="view-board" class="view" aria-label="辟谣榜">
+      <div class="board-toolbar">
+        <div class="board-tabs" id="board-tabs">
+          <button class="tab active" data-range="day">日榜</button>
+          <button class="tab" data-range="week">周榜</button>
+          <button class="tab" data-range="month">月榜</button>
+          <button class="tab" data-range="year">年榜</button>
+        </div>
+        <input type="search" id="board-search" class="board-search" placeholder="输入关键词检索…">
+      </div>
+      <div id="board-list" class="card-list"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>本站是帮助用户自查的辅助工具，不是下结论的判官 · 数据人工整理 · 每条信源可点开验证</p>
+    </div>
+  </footer>
+
+  <script src="js/data.js"></script>
+  <script src="js/home.js"></script>
 </body>
 </html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>热点详情 · 热门时事真伪辨别</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="back-link" href="index.html">← 返回首页</a>
+      <h1 class="site-title">🔍 热门时事真伪辨别</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 核查档案头部：标题 + 结论标签 + 更新日期（第 4 步由 detail.js 填充） -->
+    <section id="detail-head" class="detail-head">
+      <div class="empty-state">正在加载核查档案…（第 4 步完成后此处显示内容）</div>
+    </section>
+
+    <!-- 溯源时间线（F1） -->
+    <section id="section-timeline" class="detail-section" hidden>
+      <h2>溯源时间线</h2>
+      <div id="timeline" class="timeline"></div>
+    </section>
+
+    <!-- 信源比对（F2） -->
+    <section id="section-sources" class="detail-section" hidden>
+      <h2>信源比对</h2>
+      <div id="source-cards" class="source-cards"></div>
+      <p id="cross-check" class="cross-check"></p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>本站是帮助用户自查的辅助工具，不是下结论的判官 · 数据人工整理 · 每条信源可点开验证</p>
+    </div>
+  </footer>
+
+  <script src="js/data.js"></script>
+  <script src="js/detail.js"></script>
+</body>
+</html>
