@@ -95,6 +95,21 @@ function getBoardItems() {
   );
 }
 
+/** 找出「比当前档更长、且有条目」的最短档位（给空状态指路用，避免用户停在死胡同） */
+function findLongerRange() {
+  const order = ["week", "month", "year"];
+  const startIdx = order.indexOf(boardRange);
+  for (let i = startIdx + 1; i < order.length; i++) {
+    const key = order[i];
+    const count = ALL_ITEMS.filter((it) =>
+      (it.verdict === "假" || it.verdict === "部分属实") &&
+      inRange(it.updated_at, BOARD_RANGES[key])
+    ).length;
+    if (count > 0) return { key: key, name: RANGE_NAMES[key], count: count };
+  }
+  return null;
+}
+
 /** 渲染辟谣榜视图 */
 function renderBoard() {
   const listEl = document.getElementById("board-list");
@@ -116,12 +131,24 @@ function renderBoard() {
 
   // 空状态：区分「榜内本来就没有」和「检索无结果」两种提示（PRD A3 / A4b）
   if (!items.length) {
+    if (kw) {
+      // 检索无结果：提示换关键词（原逻辑不动）
+      listEl.innerHTML =
+        '<div class="empty-state">没有匹配「' + kw + '」的辟谣条目，换个关键词试试</div>';
+      return;
+    }
+    // 当前档为空：若更长时间档有条目，给出指路按钮（修复：之前是死胡同，用户不知道数据其实在周/月/年榜里）
+    const longer = findLongerRange();
+    if (longer) {
+      listEl.innerHTML =
+        '<div class="empty-state">' +
+        RANGE_NAMES[boardRange] + '暂无新增辟谣，' + longer.name + '有 ' + longer.count + ' 条　' +
+        '<button type="button" class="empty-jump" data-range="' + longer.key + '">查看' + longer.name + '</button>' +
+        "</div>";
+      return;
+    }
     listEl.innerHTML =
-      '<div class="empty-state">' +
-      (kw
-        ? '没有匹配「' + kw + '」的辟谣条目，换个关键词试试'
-        : RANGE_NAMES[boardRange] + '暂无新增辟谣（数据更新后自动出现在这里）') +
-      "</div>";
+      '<div class="empty-state">' + RANGE_NAMES[boardRange] + '暂无新增辟谣（数据更新后自动出现在这里）</div>';
     return;
   }
 
@@ -141,6 +168,17 @@ function initBoard() {
 
   document.getElementById("board-search").addEventListener("input", (e) => {
     boardKeyword = e.target.value;
+    renderBoard();
+  });
+
+  // 空状态指路按钮：点击切换到更长时间档（事件委托，按钮是动态生成的）
+  document.getElementById("board-list").addEventListener("click", (e) => {
+    const btn = e.target.closest(".empty-jump");
+    if (!btn) return;
+    boardRange = btn.dataset.range;
+    document.querySelectorAll("#board-tabs .tab").forEach((t) =>
+      t.classList.toggle("active", t.dataset.range === boardRange)
+    );
     renderBoard();
   });
 }
