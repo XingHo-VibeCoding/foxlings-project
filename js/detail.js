@@ -134,21 +134,24 @@ function renderFavButton(item) {
   paintFav(btn, getFavs().indexOf(item.id) !== -1 ? "saved" : "idle");
   head.appendChild(btn);
 
-  let busy = false; // 处理期间拦住重复点击（配合 disabled 双保险）
+  let busy = false;        // 处理期间拦住重复点击（配合 disabled 双保险）
+  let failTimer = null;    // 失败提示的复原定时器；重试点击时要先清掉，避免旧定时器覆盖新状态
 
   btn.addEventListener("click", async () => {
     if (busy) return;
     busy = true;
+    if (failTimer) { clearTimeout(failTimer); failTimer = null; }
     const wasSaved = getFavs().indexOf(currentItemId) !== -1;
     paintFav(btn, wasSaved ? "undoing" : "saving");
     try {
       await simulateFav(!wasSaved);
       paintFav(btn, wasSaved ? "idle" : "saved");
     } catch (err) {
-      // 失败：红色提示 2 秒，然后回到操作前的状态，可立即重试
+      // 失败：红色提示 2 秒，然后回到操作前的状态；期间按钮保持可点，随时能按提示重试
+      btn.disabled = false;
       btn.className = "fav-btn fav-fail";
       btn.textContent = "保存失败，请重试";
-      setTimeout(() => paintFav(btn, wasSaved ? "saved" : "idle"), 2000);
+      failTimer = setTimeout(() => paintFav(btn, wasSaved ? "saved" : "idle"), 2000);
     }
     busy = false;
   });
