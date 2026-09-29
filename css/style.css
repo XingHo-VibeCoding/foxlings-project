@@ -111,12 +111,22 @@ body {
 .cross-check { margin-top: 12px; font-size: 13px; padding: 12px 16px; background: #eef1ff; border-radius: 8px; }
 
 /* ---------- Day 11：复制结论按钮（点击反馈：变身 + 弹跳） ---------- */
-.copy-btn {
+.copy-btn:hover { background: #2e49d6; }
+.copy-btn.copy-success { background: var(--c-true); animation: copiedPop .3s; }
+.copy-btn.copy-fail { background: var(--c-fake); }
+
+/* Day 11 模板练习：收藏按钮（与复制按钮同排同尺寸，布局不变） */
+.copy-btn, .fav-btn {
   display: inline-block; border: none; padding: 10px 18px; margin-top: 12px;
   border-radius: 20px; min-height: 44px;
   font-size: 13px; cursor: pointer; background: var(--c-primary); color: #fff;
   transition: background .25s;
 }
+.fav-btn { margin-left: 8px; background: #e0e3ec; color: var(--c-text); }
+.fav-btn:hover { background: #d0d4e2; }
+.fav-btn.fav-saved { background: var(--c-partial); color: #fff; }
+.fav-btn.fav-fail { background: var(--c-fake); color: #fff; }
+.fav-btn:disabled { opacity: .6; cursor: wait; }
 .copy-btn:hover { background: #2e49d6; }
 .copy-btn.copy-success { background: var(--c-true); animation: copiedPop .3s; }
 .copy-btn.copy-fail { background: var(--c-fake); }

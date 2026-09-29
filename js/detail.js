@@ -64,6 +64,96 @@ function fallbackCopy(text) {
   return ok;
 }
 
+/* ============================================================
+   Day 11 模板练习：收藏 / 撤销收藏（临时状态版，不依赖后端）
+   状态机：未收藏 → 保存中(禁用) → 已收藏 → 撤销中(禁用) → 未收藏；
+   任一处理失败 → 红色提示 2 秒 → 回到操作前状态。
+   今天数据存 localStorage（fx_favs）；将来接后端只需替换 simulateFav，
+   状态机与反馈逻辑不动。
+   ============================================================ */
+
+const FAV_KEY = "fx_favs";       // 收藏 id 列表
+const FAV_FAIL_KEY = "fx_fav_fail"; // 失败模拟开关（测试用：设为 "1" 强制失败）
+let currentItemId = "";          // 当前详情页条目 id（收藏按钮操作目标）
+
+/** 读收藏列表（localStorage 损坏时按空列表处理，不让页面挂掉） */
+function getFavs() {
+  try {
+    const v = JSON.parse(localStorage.getItem(FAV_KEY));
+    return Array.isArray(v) ? v : [];
+  } catch (e) { return []; }
+}
+
+/** 模拟保存/撤销请求：今天用 setTimeout 顶替网络请求 */
+function simulateFav(willSave) {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      // 测试开关或 URL ?favfail=1 时模拟失败，将来删掉这个判断即可
+      const forcedFail = localStorage.getItem(FAV_FAIL_KEY) === "1" ||
+        location.search.indexOf("favfail=1") !== -1;
+      if (forcedFail) { reject(new Error("模拟保存失败")); return; }
+      try {
+        let favs = getFavs();
+        const id = currentItemId;
+        if (willSave) {
+          if (favs.indexOf(id) === -1) favs.push(id);
+        } else {
+          favs = favs.filter((x) => x !== id);
+        }
+        localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+        resolve();
+      } catch (e) { reject(e); }
+    }, 500);
+  });
+}
+
+/** 按当前收藏状态渲染按钮文案与样式 */
+function paintFav(btn, state) {
+  // state: idle | saving | saved | undoing | fail
+  btn.disabled = state === "saving" || state === "undoing";
+  btn.className = "fav-btn" + (state === "saved" ? " fav-saved" : "") +
+    (state === "fail" ? " fav-fail" : "");
+  const labels = {
+    idle: "☆ 收藏这条",
+    saving: "保存中…",
+    saved: "★ 已收藏（再点撤销）",
+    undoing: "撤销中…",
+    fail: "保存失败，请重试"
+  };
+  btn.textContent = labels[state] || labels.idle;
+  btn.setAttribute("aria-live", "polite");
+}
+
+/** 渲染收藏按钮并绑定切换逻辑（在复制按钮之后调用） */
+function renderFavButton(item) {
+  currentItemId = item.id;
+  const head = document.getElementById("detail-head");
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "fav-btn";
+  paintFav(btn, getFavs().indexOf(item.id) !== -1 ? "saved" : "idle");
+  head.appendChild(btn);
+
+  let busy = false; // 处理期间拦住重复点击（配合 disabled 双保险）
+
+  btn.addEventListener("click", async () => {
+    if (busy) return;
+    busy = true;
+    const wasSaved = getFavs().indexOf(currentItemId) !== -1;
+    paintFav(btn, wasSaved ? "undoing" : "saving");
+    try {
+      await simulateFav(!wasSaved);
+      paintFav(btn, wasSaved ? "idle" : "saved");
+    } catch (err) {
+      // 失败：红色提示 2 秒，然后回到操作前的状态，可立即重试
+      btn.className = "fav-btn fav-fail";
+      btn.textContent = "保存失败，请重试";
+      setTimeout(() => paintFav(btn, wasSaved ? "saved" : "idle"), 2000);
+    }
+    busy = false;
+  });
+}
+
 /** 渲染复制按钮并绑定点击反馈（在 renderHead 之后调用） */
 function renderCopyButton(item) {
   const head = document.getElementById("detail-head");
@@ -167,6 +257,7 @@ async function initDetail() {
 
   renderHead(item);
   renderCopyButton(item);
+  renderFavButton(item);
   renderTimeline(item);
   renderSources(item);
 }
