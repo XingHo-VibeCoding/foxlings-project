@@ -21,6 +21,76 @@ function renderHead(item) {
     '<p class="card-summary">' + item.summary + "</p>";
 }
 
+/* ============================================================
+   Day 11：一键复制结论（纯前端交互，不依赖后端）
+   反馈设计：点击后按钮本身变身——成功变绿「✓ 已复制」并弹跳一下，
+   失败变红并提示原因，2 秒后自动复原；aria-live 让读屏软件也能听到
+   ============================================================ */
+
+let copyResetTimer = null; // 连续点击时先清掉上一次的复原定时器，避免状态被旧计时器打断
+
+/** 组装要复制的文本：标题 + 结论 + 摘要 + 详情页链接 */
+function buildCopyText(item) {
+  return (
+    "【真伪辨别】" + item.title + "\n" +
+    "结论：" + item.verdict + "（人工核查 · 示例数据，仅供演示）\n" +
+    "摘要：" + item.summary + "\n" +
+    "详情页：" + location.href
+  );
+}
+
+/** 按钮进入某个反馈状态（success / fail），并在 delay 后复原 */
+function setCopyState(btn, state, text, delay) {
+  btn.className = "copy-btn" + (state ? " copy-" + state : "");
+  btn.textContent = text;
+  if (copyResetTimer) clearTimeout(copyResetTimer);
+  copyResetTimer = setTimeout(() => {
+    btn.className = "copy-btn";
+    btn.textContent = "📋 复制本条结论";
+    copyResetTimer = null;
+  }, delay);
+}
+
+/** 兜底复制：剪贴板 API 不可用时用老办法（选中临时文本框 + execCommand） */
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(ta);
+  return ok;
+}
+
+/** 渲染复制按钮并绑定点击反馈（在 renderHead 之后调用） */
+function renderCopyButton(item) {
+  const head = document.getElementById("detail-head");
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "copy-btn";
+  btn.id = "copy-btn";
+  btn.textContent = "📋 复制本条结论";
+  btn.setAttribute("aria-live", "polite"); // 状态文字变化会自动播报给读屏软件
+  head.appendChild(btn);
+
+  btn.addEventListener("click", async () => {
+    const text = buildCopyText(item);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyState(btn, "success", "✓ 已复制，去粘贴看看", 2000);
+    } catch (err) {
+      // 降级：老浏览器 / 非安全上下文
+      if (fallbackCopy(text)) {
+        setCopyState(btn, "success", "✓ 已复制，去粘贴看看", 2000);
+      } else {
+        setCopyState(btn, "fail", "复制失败，请手动选择文字复制", 2600);
+      }
+    }
+  });
+}
+
 /**
  * 渲染溯源时间线（F1 / PRD A6）：
  * 节点 1 = 消息开始流传（first_seen）；节点 2 = 最早出处或「溯源中断」（origin）；
@@ -96,6 +166,7 @@ async function initDetail() {
   }
 
   renderHead(item);
+  renderCopyButton(item);
   renderTimeline(item);
   renderSources(item);
 }
