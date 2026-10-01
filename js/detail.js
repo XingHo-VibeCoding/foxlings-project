@@ -294,27 +294,39 @@ function renderSources(item) {
   document.getElementById("section-sources").hidden = false;
 }
 
-/** 入口：按地址栏 ?id= 加载对应条目 */
+/** 入口：按地址栏 ?id= 加载对应条目（Day 13：补齐 加载中 / 正常 / 空 / 错误 四种状态） */
 async function initDetail() {
   const head = document.getElementById("detail-head");
   const id = getIdFromUrl();
 
+  // 状态一：加载中
+  renderListState(head, "loading");
+
   let items;
   try {
-    items = await loadVerifiedData();
+    items = await loadItemsForPage(); // ?demo= 演示开关在 data.js 里统一处理
   } catch (err) {
-    showLoadError(head, initDetail);
+    // 状态二：错误（附「下一步怎么做」的指引，不让用户干瞪眼）
+    console.error("[detail] 数据加载失败：", err);
+    renderListState(head, "error", {
+      desc: "这条核查档案没能读出来，可能是网络抖动或 data.json 缺失。",
+      onRetry: initDetail,
+    });
     return;
   }
 
   const item = items.find((it) => it.id === id);
   if (!item) {
-    head.innerHTML =
-      '<div class="empty-state">没有找到这条核查档案（id：' + (id || "空") + "）。<br>" +
-      '<a href="index.html" class="back-link">← 回首页挑一条</a></div>';
+    // 状态三：空（没有这条档案）——给一条明确的退路
+    renderListState(head, "empty", {
+      text: "没有找到这条核查档案（id：" + (id || "空") + "）。",
+      action: "← 回首页挑一条",
+      actionHref: "index.html",
+    });
     return;
   }
 
+  // 状态四：正常
   renderHead(item);
   renderCopyButton(item);
   renderFavButton(item);
@@ -323,4 +335,18 @@ async function initDetail() {
   initSourceFilter();
 }
 
+/** 余力加练：返回上一页——站内进来的走浏览器后退（保留来路的视图与筛选），直接打开的回首页 */
+function initBackLink() {
+  const link = document.querySelector(".back-link");
+  if (!link) return;
+  link.addEventListener("click", (e) => {
+    const fromSameSite = document.referrer && document.referrer.indexOf(location.origin) === 0;
+    if (!fromSameSite) return; // 直接打开或站外进来：走原本的 href 回首页
+    e.preventDefault();
+    history.back();
+  });
+}
+
+mountDemoBanner();
+initBackLink();
 initDetail();

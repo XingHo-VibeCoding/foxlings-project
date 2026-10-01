@@ -15,15 +15,20 @@
   </header>
 
   <main class="container">
-    <!-- 视图切换：卡片流（默认） / 辟谣榜 -->
-    <nav class="view-tabs" id="view-tabs">
-      <button class="tab active" data-view="feed">热点卡片流</button>
-      <button class="tab" data-view="board">辟谣榜</button>
-      <button class="tab" data-view="favs">我的收藏</button>
-    </nav>
+    <!-- 视图切换：卡片流（默认） / 辟谣榜 / 我的收藏
+         Day 13：改用「手写 hash 路由」驱动（#/feed、#/board、#/favs），
+         刷新、分享链接、浏览器前进后退都能回到同一个视图；并补上标签的无障碍语义 -->
+    <div class="view-tabs" id="view-tabs" role="tablist" aria-label="视图切换">
+      <button class="tab active" role="tab" id="tab-feed" data-view="feed"
+              aria-selected="true" aria-controls="view-feed" tabindex="0">热点卡片流</button>
+      <button class="tab" role="tab" id="tab-board" data-view="board"
+              aria-selected="false" aria-controls="view-board" tabindex="-1">辟谣榜</button>
+      <button class="tab" role="tab" id="tab-favs" data-view="favs"
+              aria-selected="false" aria-controls="view-favs" tabindex="-1">我的收藏</button>
+    </div>
 
     <!-- 视图一：热点卡片流 -->
-    <section id="view-feed" class="view active" aria-label="热点卡片流">
+    <section id="view-feed" class="view active" role="tabpanel" aria-labelledby="tab-feed" tabindex="0" aria-label="热点卡片流">
       <!-- Day 12：结论筛选器（全部/真/假/部分属实/存疑），纯前端本地筛选 -->
       <div class="filter-bar" id="verdict-filter" role="group" aria-label="按核查结论筛选">
         <button type="button" class="chip active" data-verdict="all" aria-pressed="true">全部</button>
@@ -40,7 +45,7 @@
     </section>
 
     <!-- 视图二：辟谣榜（日/周/月/年 + 检索，第 3 步实现） -->
-    <section id="view-board" class="view" aria-label="辟谣榜">
+    <section id="view-board" class="view" role="tabpanel" aria-labelledby="tab-board" tabindex="0" aria-label="辟谣榜">
       <div class="board-toolbar">
         <div class="board-tabs" id="board-tabs">
           <button class="tab active" data-range="day">日榜</button>
@@ -54,7 +59,7 @@
     </section>
 
     <!-- 视图三：我的收藏（读详情页的收藏记录；结论筛选 + 关键词筛选叠加生效） -->
-    <section id="view-favs" class="view" aria-label="我的收藏">
+    <section id="view-favs" class="view" role="tabpanel" aria-labelledby="tab-favs" tabindex="0" aria-label="我的收藏">
       <div class="filter-bar" id="fav-verdict-filter" role="group" aria-label="按核查结论筛选收藏">
         <button type="button" class="chip active" data-verdict="all" aria-pressed="true">全部</button>
         <button type="button" class="chip" data-verdict="真" aria-pressed="false">真</button>

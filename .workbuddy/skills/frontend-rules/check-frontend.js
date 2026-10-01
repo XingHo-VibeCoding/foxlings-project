@@ -220,6 +220,61 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   R['M1_三档零横向溢出'] = totalOverflow === 0;
   O['M1_溢出合计px'] = totalOverflow;
 
+  /* ---- N 组：视图路由与四种状态（Day 13 新增规范） ---- */
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.card');
+  const hashOf = () => page.evaluate(() => location.hash);
+  const viewIdOf = () => page.evaluate(() => (document.querySelector('.view.active') || {}).id || '');
+
+  // N1 首屏：默认落在卡片流，且地址栏被规范化成 #/feed
+  R['N1_首屏落位并规范化hash'] = (await viewIdOf()) === 'view-feed' && (await hashOf()) === '#/feed';
+
+  // N6 导航标签的无障碍语义（tablist + aria-selected + aria-controls）
+  R['N6_标签是tablist语义'] = await (async () => {
+    const listRole = await page.locator('#view-tabs').getAttribute('role');
+    const selected = await page.locator('#tab-feed').getAttribute('aria-selected');
+    const controls = await page.locator('#tab-feed').getAttribute('aria-controls');
+    return listRole === 'tablist' && selected === 'true' && controls === 'view-feed';
+  })();
+
+  // N2 切视图时地址栏同步（路由的核心：视图 = 可分享的地址）
+  await page.locator('#view-tabs .tab', { hasText: '辟谣榜' }).click();
+  await page.waitForTimeout(400);
+  R['N2_切视图地址栏同步'] = (await viewIdOf()) === 'view-board' && (await hashOf()) === '#/board';
+
+  // N3 刷新后仍停在同一视图（纯 class 切换做不到这条）
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+  R['N3_刷新保持当前视图'] = (await viewIdOf()) === 'view-board';
+
+  // N4 浏览器后退可用（余力加练：返回上一页）
+  await page.goBack();
+  await page.waitForTimeout(500);
+  R['N4_浏览器后退可用'] = (await viewIdOf()) === 'view-feed';
+
+  // N5 非法 hash 必须回落默认视图，不能白屏
+  await page.goto(BASE + '/#/没有这个视图', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(400);
+  R['N5_非法hash回落默认视图'] = (await viewIdOf()) === 'view-feed';
+
+  // N7 四种状态都要能出现：加载中 / 空 / 错误 / 正常
+  await page.goto(BASE + '/?demo=loading', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(900);
+  const stLoading = (await page.locator('#card-list .state-loading .spinner').count()) === 1;
+  await page.goto(BASE + '/?demo=empty', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(600);
+  const stEmpty = (await page.locator('#card-list .state-empty').count()) === 1;
+  await page.goto(BASE + '/?demo=error', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(600);
+  const stError = (await page.locator('#card-list .state-error').count()) === 1;
+  const stRetry = (await page.locator('#card-list .state-error .empty-jump').count()) === 1;
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.card');
+  const stNormal = (await page.locator('#card-list .empty-state').count()) === 0;
+  R['N7_四种状态都能出现'] = stLoading && stEmpty && stError && stNormal;
+  R['N8_错误态给出重试出口'] = stRetry;
+  O['N7_四态明细'] = JSON.stringify({ loading: stLoading, empty: stEmpty, error: stError, normal: stNormal });
+
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });
   await page.goto(BASE, { waitUntil: 'networkidle' });

@@ -97,3 +97,25 @@
 
 - `css/style.css` 124–127 行与 141–143 行的 `.copy-btn` 三条规则重复（Day 11 两次编辑叠加），功能无影响，纯冗余。
 - `--c-partial`（橙）被「部分属实」标签与「收藏成功」按钮共用；`--c-true`（绿）被「真」标签与「复制成功」共用。
+
+
+## 2026-10-01 晚（Day 13 · hash 路由 + 列表四态之后的全量回归）
+
+**被检查对象**：js/home.js（hash 路由 + 状态机重写）、js/data.js（renderListState + 演示开关）、js/detail.js（四态 + 返回上一页）、index.html / detail.html（tablist 语义 + 面包屑）、css/style.css（spinner / state / demo-banner / breadcrumb）
+
+**结论：ALL_PASS（58 项硬门槛全过，退出码 0）** —— 其中 N 组 8 项为本次新增：
+
+| 断言 | 结果 |
+|---|---|
+| N1 首屏落位并规范化 hash（#/feed） | ✅ |
+| N2 切视图地址栏同步（#/board） | ✅ |
+| N3 刷新保持当前视图 | ✅ |
+| N4 浏览器后退可用 | ✅ |
+| N5 非法 hash 回落默认视图 | ✅ |
+| N6 标签是 tablist 语义 | ✅ |
+| N7 四种状态都能出现（loading/empty/error/normal） | ✅ |
+| N8 错误态给出重试出口 | ✅ |
+
+观察项：N7_四态明细 = {loading:true, empty:true, error:true, normal:true}；M1 溢出合计 0px；标签对比度 5.79~6.92:1。
+
+**本次 Skill 自身的变更**：新增 N 组 8 条断言（路由 + 四态）；SKILL.md 新增「五、视图路由与列表四态」9 条规则（N1–N9），原五/六节顺延为六/七节；已知边界补充 hash 路由取舍与 ?demo= 上线前须删。

@@ -35,25 +35,69 @@ function matchKeyword(item, kw) {
   return (item.title + item.summary).indexOf(kw) !== -1;
 }
 
-async function renderFeed() {
-  const listEl = document.getElementById("card-list");
-  listEl.innerHTML = '<div class="empty-state">正在加载…</div>';
+/* ============================================================
+   Day 13：数据状态机 + 手写 hash 路由
+   三个视图共用一份数据，数据状态只有三种：loading / ok / error；
+   「空」是各视图自己的语义（无条目 / 筛空 / 零收藏），由各视图渲染。
+   ============================================================ */
+
+let DATA_STATE = "loading"; // loading | ok | error
+
+/** 三个列表视图一起渲染（切换视图时不会看到别的视图的残留状态） */
+function renderAllViews() {
+  renderFeed();
+  renderBoard();
+  renderFavView();
+}
+
+/**
+ * 状态闸门：数据处于「加载中 / 错误」时直接渲染对应状态并返回 true，调用方立即收工。
+ * 这样三个视图都能看到完整的四种状态，不会再出现「加载失败却永远停在加载中」。
+ */
+function stateGuard(listEl) {
+  if (DATA_STATE === "loading") { renderListState(listEl, "loading"); return true; }
+  if (DATA_STATE === "error") {
+    renderListState(listEl, "error", { onRetry: initData });
+    return true;
+  }
+  return false;
+}
+
+/** 入口：加载数据 → 落到 ok / error → 三个视图一次性渲染 */
+async function initData() {
+  DATA_STATE = "loading";
+  renderAllViews();
 
   try {
-    ALL_ITEMS = await loadVerifiedData();
+    ALL_ITEMS = await loadItemsForPage(); // ?demo= 演示开关在 data.js 里统一处理
+    DATA_STATE = "ok";
   } catch (err) {
-    showLoadError(listEl, renderFeed);
+    console.error("[home] 数据加载失败：", err);
+    DATA_STATE = "error";
+  }
+
+  renderAllViews();
+}
+
+/** 视图一：热点卡片流（加载/错误 → 状态；数据就绪 → 按当前筛选条件渲染） */
+function renderFeed() {
+  const listEl = document.getElementById("card-list");
+  const summaryEl = document.getElementById("filter-summary");
+
+  if (stateGuard(listEl)) {
+    if (summaryEl) summaryEl.textContent = DATA_STATE === "loading" ? "正在加载数据…" : "数据未就绪";
     return;
   }
 
   if (!ALL_ITEMS.length) {
-    listEl.innerHTML = '<div class="empty-state">暂无数据（data.json 为空或全部条目未通过校验）</div>';
+    renderListState(listEl, "empty", {
+      text: "暂无核查数据（data.json 为空，或全部条目未通过校验）",
+    });
     resetFilterSummary(0);
     return;
   }
 
-  renderFilteredFeed(); // 按当前筛选条件渲染（数据到位后即可筛选）
-  renderBoard();        // 数据到位后预先渲染榜单（供切入时直接显示）
+  renderFilteredFeed();
 }
 
 /**
@@ -75,32 +119,30 @@ function renderFilteredFeed() {
   resetFilterSummary(items.length);
 
   if (!items.length) {
+    const hasVerdict = verdictFilter !== VERDICT_ALL;
     if (kw) {
       // 关键词没匹配上：统一文案 + 按当前筛选状况决定出口按钮的语义
-      const hasVerdict = verdictFilter !== VERDICT_ALL;
-      listEl.innerHTML =
-        '<div class="empty-state">没有找到相关内容' +
-        '<button type="button" class="empty-jump" id="feed-clear" data-mode="' +
-        (hasVerdict ? "all" : "kw") + '">' +
-        (hasVerdict ? "清空全部筛选" : "清空关键词") + "</button></div>";
-      const clearBtn = document.getElementById("feed-clear");
-      if (clearBtn) {
-        clearBtn.addEventListener("click", () => {
+      renderListState(listEl, "empty", {
+        text: "没有找到相关内容",
+        action: hasVerdict ? "清空全部筛选" : "清空关键词",
+        actionId: "feed-clear",
+        onAction: () => {
           feedKeyword = "";
           const search = document.getElementById("feed-search");
           if (search) search.value = "";
-          if (clearBtn.dataset.mode === "all") { applyFilter(VERDICT_ALL); return; }
-          renderFilteredFeed();
-        });
-      }
+          if (hasVerdict) { applyFilter(VERDICT_ALL); return; }
+          renderFeed();
+        },
+      });
       return;
     }
     // 只有结论筛选没结果：说清楚筛的是什么，并给一键回到全部的出口
-    listEl.innerHTML =
-      '<div class="empty-state">当前没有「' + verdictFilter + '」结论的核查条目。' +
-      '<button type="button" class="empty-jump" id="filter-reset">显示全部</button></div>';
-    const resetBtn = document.getElementById("filter-reset");
-    if (resetBtn) resetBtn.addEventListener("click", () => applyFilter(VERDICT_ALL));
+    renderListState(listEl, "empty", {
+      text: "当前没有「" + verdictFilter + "」结论的核查条目。",
+      action: "显示全部",
+      actionId: "filter-reset",
+      onAction: () => applyFilter(VERDICT_ALL),
+    });
     return;
   }
 
@@ -127,7 +169,7 @@ function applyFilter(verdict) {
     chip.classList.toggle("active", on);
     chip.setAttribute("aria-pressed", on ? "true" : "false");
   });
-  renderFilteredFeed();
+  renderFeed();
 }
 
 /** 绑定筛选器点击 + 关键词输入（输入即过滤，清空即恢复完整列表） */
@@ -140,7 +182,7 @@ function initFilter() {
   if (search) {
     search.addEventListener("input", (e) => {
       feedKeyword = e.target.value;
-      renderFilteredFeed();
+      renderFeed();
     });
   }
 }
@@ -178,10 +220,11 @@ function updateFavSummary(count) {
 /** 渲染收藏列表：结论 + 关键词叠加筛选；四种状态各自有明确出口，不留死胡同 */
 function renderFavView() {
   const listEl = document.getElementById("fav-list");
+  const summaryEl = document.getElementById("fav-summary");
 
-  // 数据未就绪：不能当成「零收藏」，否则会误报空态
-  if (!ALL_ITEMS.length) {
-    listEl.innerHTML = '<div class="empty-state">正在加载…</div>';
+  // 加载中 / 错误：交给状态闸门（不能当成「零收藏」，否则会误报空态）
+  if (stateGuard(listEl)) {
+    if (summaryEl) summaryEl.textContent = DATA_STATE === "loading" ? "正在加载数据…" : "数据未就绪";
     return;
   }
 
@@ -190,16 +233,13 @@ function renderFavView() {
 
   // 状态一：零数据（一条都没收藏）—— 文案必须与「筛空」不同，并给去获取数据的出口
   if (!owned.length) {
-    listEl.innerHTML =
-      '<div class="empty-state">还没有收藏任何条目。去「热点卡片流」点开一条，在详情页按「☆ 收藏这条」就会出现在这里。' +
-      '<button type="button" class="empty-jump" id="fav-goto-feed">去卡片流看看</button></div>';
+    renderListState(listEl, "empty", {
+      text: "还没有收藏任何条目。去「热点卡片流」点开一条，在详情页按「☆ 收藏这条」就会出现在这里。",
+      action: "去卡片流看看",
+      actionId: "fav-goto-feed",
+      onAction: () => { location.hash = "#/feed"; },
+    });
     updateFavSummary(0);
-    const goBtn = document.getElementById("fav-goto-feed");
-    if (goBtn) {
-      goBtn.addEventListener("click", () => {
-        document.querySelector('#view-tabs .tab[data-view="feed"]').click();
-      });
-    }
     return;
   }
 
@@ -214,21 +254,18 @@ function renderFavView() {
   // 状态二：无结果（筛了但没匹配）—— 统一文案 + 出口；若结论筛选也在，出口清掉全部条件
   if (!items.length) {
     const hasVerdict = favVerdictFilter !== VERDICT_ALL;
-    listEl.innerHTML =
-      '<div class="empty-state">没有找到相关内容' +
-      '<button type="button" class="empty-jump" id="fav-clear" data-mode="' +
-      (hasVerdict ? "all" : "kw") + '">' +
-      (hasVerdict ? "清空全部筛选" : "清空关键词") + "</button></div>";
-    const clearBtn = document.getElementById("fav-clear");
-    if (clearBtn) {
-      clearBtn.addEventListener("click", () => {
+    renderListState(listEl, "empty", {
+      text: "没有找到相关内容",
+      action: hasVerdict ? "清空全部筛选" : "清空关键词",
+      actionId: "fav-clear",
+      onAction: () => {
         favKeyword = "";
         const search = document.getElementById("fav-search");
         if (search) search.value = "";
-        if (clearBtn.dataset.mode === "all") { applyFavFilter(VERDICT_ALL); return; }
+        if (hasVerdict) { applyFavFilter(VERDICT_ALL); return; }
         renderFavView();
-      });
-    }
+      },
+    });
     return;
   }
 
@@ -263,25 +300,86 @@ function initFavFilter() {
   }
 }
 
-/** 视图切换：卡片流 ↔ 辟谣榜 ↔ 我的收藏（辟谣榜内容第 3 步填充） */
-function initViewTabs() {
-  const tabs = document.querySelectorAll("#view-tabs .tab");
-  tabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      tabs.forEach((t) => t.classList.remove("active"));
-      tab.classList.add("active");
-      document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
-      document.getElementById("view-" + tab.dataset.view).classList.add("active");
-      if (tab.dataset.view === "board") renderBoard(); // 切入榜单时立即渲染（修复：此前首次进入榜单是空白）
-      if (tab.dataset.view === "favs") renderFavView(); // 切入收藏时立即渲染（详情页刚收藏的要能看到）
+/* ============================================================
+   Day 13：手写 hash 路由（不引入路由库）
+   为什么选它：
+     ① 刷新 / 分享 / 收藏链接都能回到同一个视图（原来的纯 class 切换做不到）
+     ② 浏览器前进后退天然可用，白捡一个「返回上一页」
+     ③ 只有三个视图，路由库属于杀鸡用牛刀（今日不做：路由库进阶用法）
+   约定：#/feed、#/board、#/favs；空 hash 或非法值一律回落到 #/feed
+   ============================================================ */
+
+const VIEWS = ["feed", "board", "favs"];
+const VIEW_TITLES = { feed: "热点卡片流", board: "辟谣榜", favs: "我的收藏" };
+const BASE_TITLE = "热门时事真伪辨别";
+
+/** 从地址栏解析当前视图；解析不出来就当卡片流 */
+function viewFromHash() {
+  const m = String(location.hash || "").match(/^#\/?([a-zA-Z]+)/);
+  const name = m ? m[1].toLowerCase() : "";
+  return VIEWS.indexOf(name) !== -1 ? name : "feed";
+}
+
+/** 把界面切到指定视图（只改界面，不动地址栏） */
+function paintView(name) {
+  const view = VIEWS.indexOf(name) !== -1 ? name : "feed";
+
+  VIEWS.forEach((v) => {
+    document.getElementById("view-" + v).classList.toggle("active", v === view);
+  });
+
+  document.querySelectorAll("#view-tabs .tab").forEach((t) => {
+    const on = t.dataset.view === view;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", on ? "true" : "false");
+    t.tabIndex = on ? 0 : -1; // 键盘 Tab 只停在当前标签上
+  });
+
+  document.title = (view === "feed" ? "" : VIEW_TITLES[view] + " · ") + BASE_TITLE;
+}
+
+/** 切视图的唯一入口：同步地址栏 → 由 hashchange 统一处理（这样前进后退才能用） */
+function goToView(name) {
+  const view = VIEWS.indexOf(name) !== -1 ? name : "feed";
+  if (viewFromHash() === view) { paintView(view); renderAllViews(); return; }
+  location.hash = "#/" + view;
+}
+
+function initRouter() {
+  const tabs = Array.from(document.querySelectorAll("#view-tabs .tab"));
+
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => goToView(tab.dataset.view));
+
+    // 余力加练：可访问的导航标签——左右方向键 / Home / End 在标签间移动
+    tab.addEventListener("keydown", (e) => {
+      const map = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 };
+      if (!(e.key in map)) return;
+      e.preventDefault();
+      const next = tabs[(map[e.key] + tabs.length) % tabs.length];
+      next.focus();
+      goToView(next.dataset.view);
     });
+  });
+
+  // 地址栏变化（含浏览器前进 / 后退）→ 切视图并重新渲染
+  window.addEventListener("hashchange", () => {
+    paintView(viewFromHash());
+    renderAllViews();
+    window.scrollTo(0, 0);
   });
 }
 
-initViewTabs();
+initRouter();
+paintView(viewFromHash()); // 首屏按地址栏落位（直接打开 #/board 就停在这一档）
+// 地址栏规范化：空 hash 或非法值补成 #/feed（replaceState 不产生多余历史记录）
+if (!/^#\/(feed|board|favs)$/.test(location.hash)) {
+  history.replaceState(null, "", "#/" + viewFromHash());
+}
 initFilter();
 initFavFilter();
-renderFeed();
+mountDemoBanner();
+initData();
 
 /* ============================================================
    第 3 步：辟谣榜（日/周/月/年切换 + 关键词检索 + 空状态）
@@ -333,10 +431,8 @@ function findLongerRange() {
 function renderBoard() {
   const listEl = document.getElementById("board-list");
 
-  if (!ALL_ITEMS.length) {
-    listEl.innerHTML = '<div class="empty-state">数据尚未加载完成…</div>';
-    return;
-  }
+  // 加载中 / 错误：交给状态闸门
+  if (stateGuard(listEl)) return;
 
   let items = getBoardItems();
 
@@ -346,32 +442,40 @@ function renderBoard() {
     items = items.filter((it) => (it.title + it.summary).indexOf(kw) !== -1);
   }
 
-  listEl.innerHTML = "";
-
-  // 空状态：区分「榜内本来就没有」和「检索无结果」两种提示（PRD A3 / A4b）
+  // 空状态：区分「没有辟谣数据」「榜内本来就没有」「检索无结果」三种（PRD A3 / A4b）
   if (!items.length) {
+    if (!ALL_ITEMS.length) {
+      renderListState(listEl, "empty", {
+        text: "暂无辟谣数据（data.json 为空，或全部条目未通过校验）",
+      });
+      return;
+    }
     if (kw) {
       // 检索无结果：统一文案「没有找到相关内容」+ 清空出口（清空后恢复该档完整列表）
-      listEl.innerHTML =
-        '<div class="empty-state">没有找到相关内容' +
-        '<button type="button" class="empty-jump" id="board-clear">清空关键词</button></div>';
+      renderListState(listEl, "empty", {
+        text: "没有找到相关内容",
+        action: "清空关键词",
+        actionId: "board-clear",
+      });
       return;
     }
     // 当前档为空：若更长时间档有条目，给出指路按钮（修复：之前是死胡同，用户不知道数据其实在周/月/年榜里）
     const longer = findLongerRange();
     if (longer) {
-      listEl.innerHTML =
-        '<div class="empty-state">' +
-        RANGE_NAMES[boardRange] + '暂无新增辟谣，' + longer.name + '有 ' + longer.count + ' 条　' +
-        '<button type="button" class="empty-jump" data-range="' + longer.key + '">查看' + longer.name + '</button>' +
-        "</div>";
+      renderListState(listEl, "empty", {
+        text: RANGE_NAMES[boardRange] + "暂无新增辟谣，" + longer.name + "有 " + longer.count + " 条",
+        action: "查看" + longer.name,
+        actionData: { range: longer.key },
+      });
       return;
     }
-    listEl.innerHTML =
-      '<div class="empty-state">' + RANGE_NAMES[boardRange] + '暂无新增辟谣（数据更新后自动出现在这里）</div>';
+    renderListState(listEl, "empty", {
+      text: RANGE_NAMES[boardRange] + "暂无新增辟谣（数据更新后自动出现在这里）",
+    });
     return;
   }
 
+  listEl.innerHTML = "";
   items.forEach((it, i) => listEl.appendChild(renderCard(it, i)));
 }
 

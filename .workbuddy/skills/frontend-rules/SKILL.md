@@ -135,7 +135,23 @@ agent_created: true
 | M5 | 间距尽量取 4 的倍数（4 / 8 / 12 / 16 / 20 / 24 / 32），不出现随手写的零碎值 |
 | M6 | 长文本（标题、摘要）不得撑破容器；卡片宽度跟随容器 |
 
-## 五、修改前检查（动手之前必须做完这 5 条）
+## 五、视图路由与列表四态（Day 13 起）
+
+来源：Day 13「实现 3 个视图 + 补齐四种状态」。
+
+| 规则 | 内容 |
+|---|---|
+| N1 | 首页三个视图用**手写 hash 路由**驱动：`#/feed`、`#/board`、`#/favs`。切换必须改地址栏（`location.hash`），由 `hashchange` 统一落到界面——不引入路由库 |
+| N2 | 首屏加载要把地址栏规范化成 `#/feed`（用 `history.replaceState`，不额外产生历史记录）；空 hash 或非法值一律回落到 `#/feed`，**不许白屏** |
+| N3 | 任何"切视图"的地方都必须走 `goToView()` 这一个入口（含空态里的跳转按钮），不许直接操作 class，否则前进后退会错乱 |
+| N4 | 视图标签要有完整 tab 语义：容器 `role="tablist"`、标签 `role="tab"` + `aria-selected` + `aria-controls`；面板 `role="tabpanel"` + `aria-labelledby`；非当前标签 `tabindex="-1"`（Tab 键只停在当前项），并支持 ← → / Home / End |
+| N5 | 视图切换成功的同时更新 `document.title`（非默认视图加前缀，如「辟谣榜 · 热门时事真伪辨别」），让多标签用户的标签页可分辨 |
+| N6 | **每个列表都必须能进入四种状态**：加载中（转圈 + 文字）/ 正常（渲染列表）/ 空（说明 + 出口按钮）/ 错误（原因 + 重试按钮）。数据层状态用统一状态机（`loading / ok / error`）+ 状态闸门 `stateGuard()`，禁止"加载失败还永远显示加载中" |
+| N7 | 三态渲染统一走 `renderListState(container, state, opts)`，外层类固定 `.empty-state` + `.state-xxx`，出口按钮固定 `.empty-jump`；错误态加 `role="alert"`，加载/空加 `role="status"` |
+| N8 | 空态文案必须与上下文区分（无数据 / 筛空 / 零收藏是三种不同的话），且**都必须有出口**，不留死胡同 |
+| N9 | 状态演示开关走地址栏 `?demo=loading|empty|error`（`data.js` 的 `readDemoState()` / `loadItemsForPage()`），仅用于本地演示与验收，接后端后整段删除；开启时页面顶部挂 `.demo-banner` 明确告知，避免被误认成真故障 |
+
+## 六、修改前检查（动手之前必须做完这 5 条）
 
 1. **对范围**：这次改动属于哪一天的任务、对应 PRD 的哪条验收标准（A1–A12b）？说不出来就先别动手（AGENTS.md 第一节）。
 2. **列文件**：列出准备改动的文件，确认都在 `D:\AI\foxlings-project` 仓库内，不碰仓库外任何文件（AGENTS.md 第八节）。
@@ -143,7 +159,7 @@ agent_created: true
 4. **问多余**：如果冒出一个"顺手改会更好看"的念头，但它不在本次任务范围内 —— **先问，等点头再动**。
 5. **留基线**：记下改动前的状态（截图 / 命令输出），后面才好做「前后对比」这个证据。
 
-## 六、修改后验证（提交之前的硬门槛）
+## 七、修改后验证（提交之前的硬门槛）
 
 1. 本地服务器在跑：项目根目录执行 `python -m http.server 8000 --bind 127.0.0.1`（端口 8000 偶尔被系统保留，绑 127.0.0.1 可绕过）。
 2. 执行脚本：`node .workbuddy/skills/frontend-rules/check-frontend.js`
@@ -168,7 +184,7 @@ node .workbuddy/skills/frontend-rules/check-frontend.js
 node .workbuddy/skills/frontend-rules/filter3-check.js
 ```
 
-脚本分六组：**L** 页面层级 / **C** 颜色与字体 / **B** 卡片与按钮 / **M** 移动端 / **R** 回归底线 / **O** 观察项。
+脚本分七组：**L** 页面层级 / **C** 颜色与字体 / **B** 卡片与按钮 / **M** 移动端 / **N** 路由与四态 / **R** 回归底线 / **O** 观察项。
 
 - 打印 JSON 结果 + `ALL_PASS` 或 `FAIL: xxx`
 - 硬门槛失败时以退出码 1 结束
@@ -192,6 +208,8 @@ node .workbuddy/skills/frontend-rules/filter3-check.js
 - 脚本的对比度计算基于 `:root` 里的变量值，**不解析组件内硬编码的中性色**（那部分由白名单控制）。
 - 卡片 hover 动效只能在真实浏览器里测得（依赖 `:hover`），无头模式用强制 hover 模拟。
 - 字体渲染、亚像素对齐等视觉细节脚本测不了，仍需人工看一眼截图。
+- **hash 路由的地址带 `#`**（`index.html#/board`），不是 `/board` 这种干净路径。这是纯静态托管（GitHub Pages 无重写规则）下的自觉取舍——用 History API 需要 404 回退方案，列入下一步计划，不阻塞当前阶段。
+- `?demo=` 演示开关是**临时装置**，上线前必须删（或用构建流程剔除），否则用户能手动把页面强制成错误态。
 
 ## 已知技术债（记录在案，未擅自修改）
 

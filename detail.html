@@ -15,10 +15,16 @@
   </header>
 
   <main class="container">
-    <!-- 核查档案头部：标题 + 结论标签 + 更新日期（第 4 步由 detail.js 填充） -->
-    <section id="detail-head" class="detail-head">
-      <div class="empty-state">正在加载核查档案…（第 4 步完成后此处显示内容）</div>
-    </section>
+    <!-- Day 13 余力加练：面包屑 —— 随时告诉用户「我现在在哪一层」 -->
+    <nav class="breadcrumb" aria-label="面包屑">
+      <a href="index.html">首页</a>
+      <span class="crumb-sep" aria-hidden="true">›</span>
+      <span aria-current="page">核查详情</span>
+    </nav>
+
+    <!-- 核查档案头部：标题 + 结论标签 + 更新日期（第 4 步由 detail.js 填充）
+         Day 13：内容改由 detail.js 按「加载中 / 正常 / 空 / 错误」四种状态渲染 -->
+    <section id="detail-head" class="detail-head"></section>
 
     <!-- 溯源时间线（F1） -->
     <section id="section-timeline" class="detail-section" hidden>
