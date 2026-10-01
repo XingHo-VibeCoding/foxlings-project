@@ -23,6 +23,15 @@
 
     <!-- 视图一：热点卡片流 -->
     <section id="view-feed" class="view active" aria-label="热点卡片流">
+      <!-- Day 12：结论筛选器（全部/真/假/部分属实/存疑），纯前端本地筛选 -->
+      <div class="filter-bar" id="verdict-filter" role="group" aria-label="按核查结论筛选">
+        <button type="button" class="chip active" data-verdict="all" aria-pressed="true">全部</button>
+        <button type="button" class="chip" data-verdict="真" aria-pressed="false">真</button>
+        <button type="button" class="chip" data-verdict="假" aria-pressed="false">假</button>
+        <button type="button" class="chip" data-verdict="部分属实" aria-pressed="false">部分属实</button>
+        <button type="button" class="chip" data-verdict="存疑" aria-pressed="false">存疑</button>
+      </div>
+      <p class="filter-summary" id="filter-summary" aria-live="polite">共 0 条</p>
       <div id="card-list" class="card-list"></div>
     </section>
 

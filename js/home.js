@@ -25,7 +25,10 @@ function renderCard(item, index) {
   return card;
 }
 
-/** 视图一：热点卡片流 */
+/** 视图一：热点卡片流（Day 12 起支持按核查结论筛选） */
+const VERDICT_ALL = "all";      // 筛选值：全部
+let verdictFilter = VERDICT_ALL; // 当前筛选的结论
+
 async function renderFeed() {
   const listEl = document.getElementById("card-list");
   listEl.innerHTML = '<div class="empty-state">正在加载…</div>';
@@ -39,12 +42,62 @@ async function renderFeed() {
 
   if (!ALL_ITEMS.length) {
     listEl.innerHTML = '<div class="empty-state">暂无数据（data.json 为空或全部条目未通过校验）</div>';
+    resetFilterSummary(0);
+    return;
+  }
+
+  renderFilteredFeed(); // 按当前筛选条件渲染（数据到位后即可筛选）
+  renderBoard();        // 数据到位后预先渲染榜单（供切入时直接显示）
+}
+
+/** 按当前筛选条件渲染卡片流 + 结果计数（筛选三种情况：有结果 / 无结果 / 清空恢复） */
+function renderFilteredFeed() {
+  const listEl = document.getElementById("card-list");
+  const items = verdictFilter === VERDICT_ALL
+    ? ALL_ITEMS
+    : ALL_ITEMS.filter((it) => it.verdict === verdictFilter);
+
+  resetFilterSummary(items.length);
+
+  if (!items.length) {
+    // 无结果：说清楚筛的是什么，并给一键回到全部的出口
+    listEl.innerHTML =
+      '<div class="empty-state">当前没有「' + verdictFilter + '」结论的核查条目。' +
+      '<button type="button" class="empty-jump" id="filter-reset">显示全部</button></div>';
+    const resetBtn = document.getElementById("filter-reset");
+    if (resetBtn) resetBtn.addEventListener("click", () => applyFilter(VERDICT_ALL));
     return;
   }
 
   listEl.innerHTML = "";
-  ALL_ITEMS.forEach((item, i) => listEl.appendChild(renderCard(item, i)));
-  renderBoard(); // 数据到位后预先渲染榜单（供切入时直接显示）
+  items.forEach((item, i) => listEl.appendChild(renderCard(item, i)));
+}
+
+/** 更新结果计数文案（清空恢复时也要回到正确数字） */
+function resetFilterSummary(count) {
+  const el = document.getElementById("filter-summary");
+  if (!el) return;
+  el.textContent = verdictFilter === VERDICT_ALL
+    ? "共 " + count + " 条"
+    : "筛选「" + verdictFilter + "」：共 " + count + " 条";
+}
+
+/** 应用筛选：切换高亮、同步无障碍状态、重渲染 */
+function applyFilter(verdict) {
+  verdictFilter = verdict;
+  document.querySelectorAll("#verdict-filter .chip").forEach((chip) => {
+    const on = chip.dataset.verdict === verdict;
+    chip.classList.toggle("active", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  renderFilteredFeed();
+}
+
+/** 绑定筛选器点击 */
+function initFilter() {
+  document.querySelectorAll("#verdict-filter .chip").forEach((chip) => {
+    chip.addEventListener("click", () => applyFilter(chip.dataset.verdict));
+  });
 }
 
 /** 视图切换：卡片流 ↔ 辟谣榜（辟谣榜内容第 3 步填充） */
@@ -62,6 +115,7 @@ function initViewTabs() {
 }
 
 initViewTabs();
+initFilter();
 renderFeed();
 
 /* ============================================================
