@@ -29,6 +29,10 @@
     <!-- 信源比对（F2） -->
     <section id="section-sources" class="detail-section" hidden>
       <h2>信源比对</h2>
+      <!-- Day 12 延伸：信源关键词筛选（按信源名 + 域名匹配，清空恢复全部） -->
+      <input type="search" id="source-search" class="filter-search"
+             placeholder="输入关键词筛选信源…" aria-label="按关键词筛选信源">
+      <p class="filter-summary" id="source-summary" aria-live="polite">共 0 条信源</p>
       <div id="source-cards" class="source-cards"></div>
       <p id="cross-check" class="cross-check"></p>
     </section>

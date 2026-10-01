@@ -214,21 +214,78 @@ function renderTimeline(item) {
   document.getElementById("section-timeline").hidden = false;
 }
 
+/* ============================================================
+   Day 12 延伸：信源关键词筛选
+   数据对象 = 本条档案的 sources 列表；匹配「信源名 + 域名」。
+   三种情况：有匹配 → 只显示匹配信源 / 无匹配 →「没有找到相关内容」+ 清空出口 /
+             清空关键词 → 恢复完整信源列表。
+   ============================================================ */
+
+let ALL_SOURCES = [];    // 本条档案的全部信源（筛选的原始数据）
+let sourceKeyword = "";  // 当前关键词
+
+/** 取信源域名（链接异常时给可读占位，不让页面挂掉） */
+function sourceHost(url) {
+  try { return new URL(url).hostname; } catch (e) { return "（链接格式异常）"; }
+}
+
+/** 按当前关键词渲染信源列表 + 结果计数 */
+function renderSourceList() {
+  const wrap = document.getElementById("source-cards");
+  const summary = document.getElementById("source-summary");
+  const kw = sourceKeyword.trim();
+
+  const list = kw
+    ? ALL_SOURCES.filter((s) => (s.name + sourceHost(s.url)).indexOf(kw) !== -1)
+    : ALL_SOURCES;
+
+  if (summary) {
+    summary.textContent = kw
+      ? "筛选关键词「" + kw + "」：共 " + list.length + " 条信源"
+      : "共 " + list.length + " 条信源";
+  }
+
+  if (!list.length) {
+    // 无匹配：统一文案 + 清空出口（清空后恢复完整列表）
+    wrap.innerHTML =
+      '<div class="empty-state">没有找到相关内容' +
+      '<button type="button" class="empty-jump" id="source-clear">清空关键词</button></div>';
+    const clearBtn = document.getElementById("source-clear");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        sourceKeyword = "";
+        document.getElementById("source-search").value = "";
+        renderSourceList();
+      });
+    }
+    return;
+  }
+
+  wrap.innerHTML = list
+    .map((s) =>
+      '<a class="src-card" href="' + s.url + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="src-name">📎 ' + s.name + "</span>" +
+      '<span class="card-date">查证日期 ' + s.date + " · " + sourceHost(s.url) + "</span>" +
+      '<span class="src-open">点开原文亲自验证 ↗</span></a>'
+    )
+    .join("");
+}
+
+/** 绑定信源关键词输入（只绑一次；输入即过滤，清空即恢复完整列表） */
+function initSourceFilter() {
+  const search = document.getElementById("source-search");
+  if (!search) return;
+  search.addEventListener("input", (e) => {
+    sourceKeyword = e.target.value;
+    renderSourceList();
+  });
+}
+
 /** 渲染信源比对（F2 / PRD A7-A9）：≥2 张可点击信源卡 + 比对结论 */
 function renderSources(item) {
-  const wrap = document.getElementById("source-cards");
-  wrap.innerHTML = item.sources
-    .map((s) => {
-      let host = "";
-      try { host = new URL(s.url).hostname; } catch (e) { host = "（链接格式异常）"; }
-      return (
-        '<a class="src-card" href="' + s.url + '" target="_blank" rel="noopener noreferrer">' +
-        '<span class="src-name">📎 ' + s.name + "</span>" +
-        '<span class="card-date">查证日期 ' + s.date + " · " + host + "</span>" +
-        '<span class="src-open">点开原文亲自验证 ↗</span></a>'
-      );
-    })
-    .join("");
+  ALL_SOURCES = Array.isArray(item.sources) ? item.sources : [];
+  sourceKeyword = "";
+  renderSourceList();
 
   // 比对结论（三选一），未填或非法值按「信源不足」降级处理
   const cc = CROSS_LABELS.indexOf(item.cross_check) !== -1 ? item.cross_check : "信源不足";
@@ -263,6 +320,7 @@ async function initDetail() {
   renderFavButton(item);
   renderTimeline(item);
   renderSources(item);
+  initSourceFilter();
 }
 
 initDetail();

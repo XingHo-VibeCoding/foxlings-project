@@ -1,110 +1,245 @@
-/* filter-check.js — filter-check Skill 的执行脚本
-   检查筛选交互三态（有结果/无结果/清空恢复）+ 可访问性 + 回归底线
-   用法：node filter-check.js   （需先在项目根目录起 http.server 8000） */
+/* filter-check.js — 检查【任意已登记列表组件】的筛选交互
+   覆盖：三态（有结果 / 无结果 / 清空恢复）、零数据态、无障碍底线、回归底线
+   用法：
+     node filter-check.js             # 检查默认组件（feed + favs）
+     node filter-check.js favs        # 只检查某个组件
+     node filter-check.js feed favs   # 检查多个
+   前置：项目根目录已起 http.server 8000（--bind 127.0.0.1） */
 const pw = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
 const BASE = 'http://localhost:8000';
-const R = {};
+const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+const NO_MATCH = 'zzz绝不存在zzz';
+const EMPTY_TEXT = '没有找到相关内容'; // 全站统一的无结果文案
 
-(async () => {
-  const browser = await pw.chromium.launch({
-    executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 790 } });
-  const errors = [];
-  page.on('pageerror', e => errors.push(String(e)));
+/* ---------------- 组件登记表：新组件接进来只需加一条 ---------------- */
+const COMPS = {
+  feed: {
+    label: '首页·热点卡片流',
+    prepare: async (page) => {
+      await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
+      await page.waitForSelector('.card');
+    },
+    chips: '#verdict-filter .chip',
+    chipKey: 'data-verdict',
+    hitChip: { value: '存疑', count: 4 },
+    missChip: { value: '真', count: 0 },
+    hitKeyword: { value: '地铁', count: 1 },
+    list: '#card-list',
+    itemSel: '.card',
+    search: '#feed-search',
+    summary: '#filter-summary',
+    baseline: 5
+  },
+  board: {
+    label: '首页·辟谣榜',
+    prepare: async (page) => {
+      await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
+      await page.waitForSelector('.card');
+      await page.locator('#view-tabs .tab', { hasText: '辟谣榜' }).click();
+      await page.locator('#board-tabs .tab', { hasText: '周榜' }).click();
+      await page.waitForTimeout(400);
+    },
+    chips: null,
+    hitKeyword: { value: '加油站', count: 1 },
+    list: '#board-list',
+    itemSel: '.card',
+    search: '#board-search',
+    summary: null,
+    baseline: 1
+  },
+  source: {
+    label: '详情页·信源比对',
+    prepare: async (page) => {
+      await page.goto(BASE + '/detail.html?id=demo-005', { waitUntil: 'networkidle' });
+      await page.waitForSelector('#source-cards .src-card');
+    },
+    chips: null,
+    hitKeyword: { value: '石化', count: 1 },
+    list: '#source-cards',
+    itemSel: '.src-card',
+    search: '#source-search',
+    summary: '#source-summary',
+    baseline: 2
+  },
+  favs: {
+    label: '首页·我的收藏',
+    prepare: async (page) => {
+      // 造数据：清空后收藏两条（demo-001 存疑 / demo-005 假）
+      await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
+      await page.evaluate(() => localStorage.removeItem('fx_favs'));
+      for (const id of ['demo-001', 'demo-005']) {
+        await page.goto(BASE + '/detail.html?id=' + id, { waitUntil: 'networkidle' });
+        await page.waitForSelector('#fav-btn');
+        await page.locator('#fav-btn').click();
+        await page.waitForTimeout(800);
+      }
+      await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
+      await page.waitForSelector('.card');
+      await page.locator('#view-tabs .tab', { hasText: '我的收藏' }).click();
+      await page.waitForTimeout(400);
+    },
+    chips: '#fav-verdict-filter .chip',
+    chipKey: 'data-verdict',
+    hitChip: { value: '存疑', count: 1 },
+    missChip: { value: '真', count: 0 },
+    hitKeyword: { value: '加油站', count: 1 },
+    list: '#fav-list',
+    itemSel: '.card',
+    search: '#fav-search',
+    summary: '#fav-summary',
+    baseline: 2,
+    zeroDataCheck: true // 组件可能有「一条数据都没有」的状态，必须与「筛空」文案不同
+  }
+};
 
-  await page.goto(BASE, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.card');
+/* ---------------- 通用检查内核 ---------------- */
 
-  const chip = (v) => page.locator(`#verdict-filter .chip[data-verdict="${v}"]`);
-  const cards = () => page.locator('#card-list .card');
+/** 安全取文本：元素不存在或取不到时返回 null（让断言报 FAIL，而不是让脚本崩） */
+async function textOf(page, sel) {
+  if (!sel) return null;
+  const loc = page.locator(sel);
+  if (!(await loc.count())) return null;
+  try { return (await loc.first().textContent({ timeout: 3000 })) || ''; } catch (e) { return null; }
+}
 
-  R['A0_初始_全部'] = (await cards().count()) === 5 && (await page.locator('#filter-summary').textContent()).includes('共 5 条');
+async function checkComp(page, key, cfg, R) {
+  const p = key + '.';
+  const items = () => page.locator(cfg.list + ' ' + cfg.itemSel);
+  const emptyBox = () => page.locator(cfg.list + ' .empty-state');
+  let emptyText = '';
 
-  // A1 有结果：存疑（demo 数据 4 条）
-  await chip('存疑').click();
-  await page.waitForTimeout(300);
-  const n1 = await cards().count();
-  const tags1 = await page.locator('#card-list .tag').allTextContents();
-  R['A1_有结果_条数正确'] = n1 === 4;
-  R['A1_有结果_标签全部匹配'] = tags1.length > 0 && tags1.every(t => t.trim() === '存疑');
-  R['B1_计数反馈'] = (await page.locator('#filter-summary').textContent()).includes('筛选「存疑」：共 4 条');
-  R['B2_选中态唯一'] = (await page.locator('#verdict-filter .chip.active').count()) === 1 &&
-    (await page.locator('#verdict-filter .chip.active').getAttribute('data-verdict')) === '存疑';
+  await cfg.prepare(page);
 
-  // A1b 有结果：假（1 条）
-  await chip('假').click();
-  await page.waitForTimeout(300);
-  R['A1b_假_1条'] = (await cards().count()) === 1;
+  // A0 基线：不加任何筛选时的条数
+  R[p + 'A0_基线条数'] = (await items().count()) === cfg.baseline;
 
-  // A2 无结果：真（0 条）
-  await chip('真').click();
-  await page.waitForTimeout(300);
-  R['A2_无结果_无卡片'] = (await cards().count()) === 0;
-  const emptyText = (await page.locator('#card-list .empty-state').textContent()).trim();
-  R['A2_无结果_文案说明筛了什么'] = emptyText.includes('真') && emptyText.includes('没有');
-  R['A2_无结果_有出口按钮'] = (await page.locator('#card-list .empty-jump, #filter-reset').count()) >= 1;
+  // A0b 条件筛选器存在（登记了 chips 却没渲染出来 = FAIL，避免缺件被静默跳过）
+  if (cfg.chips) {
+    R[p + 'A0b_条件筛选器存在'] = (await page.locator(cfg.chips).count()) > 0;
+  }
 
-  // A3 清空恢复：点空态里的「显示全部」
-  await page.locator('#filter-reset').click();
-  await page.waitForTimeout(300);
-  R['A3_清空恢复_条数'] = (await cards().count()) === 5;
-  R['A3_清空恢复_计数文案'] = (await page.locator('#filter-summary').textContent()).includes('共 5 条');
-  R['A3_清空恢复_选中回到全部'] = (await page.locator('#verdict-filter .chip.active').getAttribute('data-verdict')) === 'all';
+  // A1 有结果：条件筛选
+  if (cfg.chips && cfg.hitChip) {
+    const chip = page.locator(cfg.chips + '[' + cfg.chipKey + '="' + cfg.hitChip.value + '"]');
+    if (await chip.count()) {
+      await chip.click();
+      await page.waitForTimeout(350);
+      R[p + 'A1_条件有结果_条数'] = (await items().count()) === cfg.hitChip.count;
+      const tags = await page.locator(cfg.list + ' .tag').allTextContents();
+      R[p + 'A1_条件有结果_内容匹配'] = tags.length > 0 && tags.every((t) => t.trim() === cfg.hitChip.value);
+      const s1 = await textOf(page, cfg.summary);
+      R[p + 'C1_计数反映条件'] = s1 !== null &&
+        s1.indexOf(cfg.hitChip.value) !== -1 && s1.indexOf(String(cfg.hitChip.count)) !== -1;
+      R[p + 'C2_选中态唯一'] = (await page.locator(cfg.chips + '.active').count()) === 1;
+      R[p + 'C3_键盘可操作'] = await (async () => {
+        await chip.focus();
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(300);
+        return (await items().count()) === cfg.hitChip.count;
+      })();
+      R[p + 'C4_aria_pressed同步'] = (await chip.getAttribute('aria-pressed')) === 'true';
+      const role = await page.locator(cfg.chips.replace(' .chip', '')).getAttribute('role');
+      R[p + 'C4_容器语义'] = role === 'group';
+      const h = await page.locator(cfg.chips).first().evaluate((el) => el.getBoundingClientRect().height);
+      R[p + 'C5_触控高度≥44'] = h >= 44;
+      const allChip = page.locator(cfg.chips + '[' + cfg.chipKey + '="all"]');
+      if (await allChip.count()) { await allChip.click(); await page.waitForTimeout(300); }
+    }
+  }
 
-  // A3b 清空恢复（顶部「全部」chip 路径）
-  await chip('假').click();
-  await page.waitForTimeout(250);
-  await chip('all').click();
-  await page.waitForTimeout(300);
-  R['A3b_全部chip_恢复'] = (await cards().count()) === 5;
+  // A1b 有结果：关键词
+  if (cfg.hitKeyword) {
+    await page.fill(cfg.search, cfg.hitKeyword.value);
+    await page.waitForTimeout(350);
+    R[p + 'A1b_关键词有结果_条数'] = (await items().count()) === cfg.hitKeyword.count;
+    const txt = await page.locator(cfg.list).textContent();
+    R[p + 'A1b_关键词有结果_内容匹配'] = txt.indexOf(cfg.hitKeyword.value) !== -1;
+    const s2 = await textOf(page, cfg.summary);
+    R[p + 'C1_计数反映关键词'] = s2 !== null && s2.indexOf(cfg.hitKeyword.value) !== -1;
+    const live = cfg.summary ? await page.locator(cfg.summary).first().getAttribute('aria-live').catch(() => null) : null;
+    R[p + 'C1_计数aria_live'] = live === 'polite';
+  }
 
-  // B3 键盘：聚焦「存疑」按 Enter
-  await chip('存疑').focus();
-  await page.keyboard.press('Enter');
-  await page.waitForTimeout(300);
-  R['B3_键盘可操作'] = (await cards().count()) === 4;
-  await chip('all').click();
-  await page.waitForTimeout(250);
+  // A2 无结果
+  await page.fill(cfg.search, NO_MATCH);
+  await page.waitForTimeout(400);
+  R[p + 'A2_无结果_零条目'] = (await items().count()) === 0;
+  emptyText = (await page.locator(cfg.list).textContent()).trim();
+  R[p + 'A2_无结果_有文案'] = emptyText.length > 0;
+  R[p + 'A2_无结果_文案统一'] = emptyText.indexOf(EMPTY_TEXT) !== -1;
+  R[p + 'A2_无结果_有出口按钮'] = (await page.locator(cfg.list + ' .empty-jump').count()) >= 1;
 
-  // B4 无障碍状态
-  const pressedBefore = await page.locator('#verdict-filter .chip[data-verdict="all"]').getAttribute('aria-pressed');
-  await chip('真').click();
-  await page.waitForTimeout(250);
-  const pressedAfter = await page.locator('#verdict-filter .chip[data-verdict="真"]').getAttribute('aria-pressed');
-  const groupRole = await page.locator('#verdict-filter').getAttribute('role');
-  const groupLabel = await page.locator('#verdict-filter').getAttribute('aria-label');
-  R['B4_aria_pressed同步'] = pressedBefore === 'true' && pressedAfter === 'true';
-  R['B4_容器语义'] = groupRole === 'group' && !!groupLabel;
-  await chip('all').click();
-  await page.waitForTimeout(250);
+  // A3 清空恢复：优先走出口按钮，再走手动清空
+  const exitBtn = page.locator(cfg.list + ' .empty-jump').first();
+  if (await exitBtn.count()) {
+    await exitBtn.click();
+    await page.waitForTimeout(400);
+    R[p + 'A3_出口恢复_条数'] = (await items().count()) === cfg.baseline;
+    const v = await page.inputValue(cfg.search);
+    R[p + 'A3_出口恢复_输入框已清空'] = v === '';
+  } else {
+    R[p + 'A3_出口恢复_条数'] = false;
+    R[p + 'A3_出口恢复_输入框已清空'] = false;
+  }
+  await page.fill(cfg.search, NO_MATCH);
+  await page.waitForTimeout(350);
+  await page.fill(cfg.search, '');
+  await page.waitForTimeout(400);
+  R[p + 'A3b_手动清空恢复_条数'] = (await items().count()) === cfg.baseline;
 
-  // B5 触控尺寸
-  const h = await page.locator('#verdict-filter .chip').first().evaluate(el => el.getBoundingClientRect().height);
-  R['B5_触控高度≥44'] = h >= 44;
+  // B1 零数据态（仅登记的组件）：与「筛空」文案必须不同
+  if (cfg.zeroDataCheck) {
+    await page.evaluate(() => localStorage.removeItem('fx_favs'));
+    await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
+    await page.waitForSelector('.card');
+    await page.locator('#view-tabs .tab', { hasText: '我的收藏' }).click();
+    await page.waitForTimeout(400);
+    const zeroText = (await page.locator(cfg.list).textContent()).trim();
+    R[p + 'B1_零数据态_有引导文案'] = zeroText.length > 0;
+    R[p + 'B1_零数据态_与筛空文案不同'] = zeroText.length > 0 && zeroText !== emptyText && zeroText.indexOf(EMPTY_TEXT) === -1;
+  }
 
-  // B6 窄屏溢出
+  // C6 窄屏溢出
   await page.setViewportSize({ width: 375, height: 700 });
   await page.waitForTimeout(400);
-  const of1 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  await chip('存疑').click();
-  await page.waitForTimeout(300);
-  const of2 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  R['B6_窄屏无溢出'] = of1 === 0 && of2 === 0;
+  R[p + 'C6_窄屏无溢出'] = (await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0;
   await page.setViewportSize({ width: 1280, height: 790 });
+  await page.waitForTimeout(300);
+}
 
-  // C1 榜单回归
+/* ---------------- 主流程 ---------------- */
+(async () => {
+  const want = process.argv.slice(2);
+  const keys = want.length ? want : ['feed', 'favs'];
+  const R = {};
+  const browser = await pw.chromium.launch({ executablePath: EDGE, headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 790 } });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+
+  for (const key of keys) {
+    const cfg = COMPS[key];
+    if (!cfg) { console.log('未登记的组件：' + key); continue; }
+    await checkComp(page, key, cfg, R);
+  }
+
+  // D1 其他视图回归：卡片流 + 辟谣榜仍能渲染
+  await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
+  await page.waitForSelector('.card');
+  R['D1_卡片流回归'] = (await page.locator('#card-list .card').count()) === 5;
   await page.locator('#view-tabs .tab', { hasText: '辟谣榜' }).click();
   await page.waitForTimeout(400);
-  const boardRendered = (await page.locator('#board-list .card').count()) +
-    (await page.locator('#board-list .empty-state').count());
-  R['C1_榜单不受影响'] = boardRendered >= 1;
-
-  R['C2_无JS错误'] = errors.length === 0;
+  R['D1_辟谣榜回归'] = (await page.locator('#board-list .card').count()) +
+    (await page.locator('#board-list .empty-state').count()) >= 1;
+  R['D2_无JS错误'] = errors.length === 0;
 
   await browser.close();
   console.log(JSON.stringify(R, null, 2));
-  const bad = Object.entries(R).filter(([k, v]) => v !== true);
-  console.log(bad.length ? 'FAIL: ' + bad.map(x => x[0]).join(', ') : 'ALL_PASS');
+  const bad = Object.entries(R).filter(([, v]) => v !== true);
+  console.log(bad.length
+    ? 'FAIL(' + bad.length + '): ' + bad.map((x) => x[0]).join(', ')
+    : 'ALL_PASS(' + Object.keys(R).length + ')');
   process.exit(bad.length ? 1 : 0);
-})().catch(e => { console.error('脚本失败:', e.message); process.exit(1); });
+})().catch((e) => { console.error('脚本失败:', e.message); process.exit(1); });

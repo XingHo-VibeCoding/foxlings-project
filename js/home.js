@@ -25,9 +25,15 @@ function renderCard(item, index) {
   return card;
 }
 
-/** 视图一：热点卡片流（Day 12 起支持按核查结论筛选） */
-const VERDICT_ALL = "all";      // 筛选值：全部
-let verdictFilter = VERDICT_ALL; // 当前筛选的结论
+/** 视图一：热点卡片流（Day 12 起支持按核查结论筛选；Day 12 延伸起支持关键词筛选） */
+const VERDICT_ALL = "all";        // 筛选值：全部
+let verdictFilter = VERDICT_ALL;  // 当前筛选的结论
+let feedKeyword = "";             // 当前关键词（与结论筛选「叠加」生效：两个条件同时满足）
+
+/** 关键词匹配规则：标题 + 摘要（本地静态过滤，无后端） */
+function matchKeyword(item, kw) {
+  return (item.title + item.summary).indexOf(kw) !== -1;
+}
 
 async function renderFeed() {
   const listEl = document.getElementById("card-list");
@@ -50,17 +56,46 @@ async function renderFeed() {
   renderBoard();        // 数据到位后预先渲染榜单（供切入时直接显示）
 }
 
-/** 按当前筛选条件渲染卡片流 + 结果计数（筛选三种情况：有结果 / 无结果 / 清空恢复） */
+/**
+ * 按当前筛选条件渲染卡片流 + 结果计数。
+ * 三种情况（Day 12 延伸）：
+ *   ① 有匹配 → 只显示匹配内容
+ *   ② 无匹配 → 显示「没有找到相关内容」，并给出口按钮
+ *   ③ 清空关键词 → 恢复完整列表（结论筛选若还在，恢复到该结论的全量）
+ */
 function renderFilteredFeed() {
   const listEl = document.getElementById("card-list");
-  const items = verdictFilter === VERDICT_ALL
+  const kw = feedKeyword.trim();
+
+  let items = verdictFilter === VERDICT_ALL
     ? ALL_ITEMS
     : ALL_ITEMS.filter((it) => it.verdict === verdictFilter);
+  if (kw) items = items.filter((it) => matchKeyword(it, kw)); // 关键词叠加在结论筛选之上
 
   resetFilterSummary(items.length);
 
   if (!items.length) {
-    // 无结果：说清楚筛的是什么，并给一键回到全部的出口
+    if (kw) {
+      // 关键词没匹配上：统一文案 + 按当前筛选状况决定出口按钮的语义
+      const hasVerdict = verdictFilter !== VERDICT_ALL;
+      listEl.innerHTML =
+        '<div class="empty-state">没有找到相关内容' +
+        '<button type="button" class="empty-jump" id="feed-clear" data-mode="' +
+        (hasVerdict ? "all" : "kw") + '">' +
+        (hasVerdict ? "清空全部筛选" : "清空关键词") + "</button></div>";
+      const clearBtn = document.getElementById("feed-clear");
+      if (clearBtn) {
+        clearBtn.addEventListener("click", () => {
+          feedKeyword = "";
+          const search = document.getElementById("feed-search");
+          if (search) search.value = "";
+          if (clearBtn.dataset.mode === "all") { applyFilter(VERDICT_ALL); return; }
+          renderFilteredFeed();
+        });
+      }
+      return;
+    }
+    // 只有结论筛选没结果：说清楚筛的是什么，并给一键回到全部的出口
     listEl.innerHTML =
       '<div class="empty-state">当前没有「' + verdictFilter + '」结论的核查条目。' +
       '<button type="button" class="empty-jump" id="filter-reset">显示全部</button></div>';
@@ -73,13 +108,15 @@ function renderFilteredFeed() {
   items.forEach((item, i) => listEl.appendChild(renderCard(item, i)));
 }
 
-/** 更新结果计数文案（清空恢复时也要回到正确数字） */
+/** 更新结果计数文案（结论 + 关键词都反映进去；清空恢复时也要回到正确数字） */
 function resetFilterSummary(count) {
   const el = document.getElementById("filter-summary");
   if (!el) return;
-  el.textContent = verdictFilter === VERDICT_ALL
-    ? "共 " + count + " 条"
-    : "筛选「" + verdictFilter + "」：共 " + count + " 条";
+  const kw = feedKeyword.trim();
+  const parts = [];
+  if (verdictFilter !== VERDICT_ALL) parts.push("「" + verdictFilter + "」");
+  if (kw) parts.push("关键词「" + kw + "」");
+  el.textContent = (parts.length ? "筛选" + parts.join(" + ") + "：" : "") + "共 " + count + " 条";
 }
 
 /** 应用筛选：切换高亮、同步无障碍状态、重渲染 */
@@ -93,14 +130,140 @@ function applyFilter(verdict) {
   renderFilteredFeed();
 }
 
-/** 绑定筛选器点击 */
+/** 绑定筛选器点击 + 关键词输入（输入即过滤，清空即恢复完整列表） */
 function initFilter() {
   document.querySelectorAll("#verdict-filter .chip").forEach((chip) => {
     chip.addEventListener("click", () => applyFilter(chip.dataset.verdict));
   });
+
+  const search = document.getElementById("feed-search");
+  if (search) {
+    search.addEventListener("input", (e) => {
+      feedKeyword = e.target.value;
+      renderFilteredFeed();
+    });
+  }
 }
 
-/** 视图切换：卡片流 ↔ 辟谣榜（辟谣榜内容第 3 步填充） */
+/* ============================================================
+   视图三：我的收藏
+   数据对象 = 用户在详情页收藏过的核查条目（localStorage: fx_favs）
+   筛选 = 结论 chip + 关键词（叠加生效）；四种状态：
+     零数据（一条都没收藏）/ 无结果（筛空）/ 有结果 / 全部
+   ============================================================ */
+
+const FAV_KEY = "fx_favs";
+let favKeyword = "";
+let favVerdictFilter = VERDICT_ALL;
+
+/** 读收藏 id 列表（localStorage 损坏时按空列表处理） */
+function getFavIds() {
+  try {
+    const v = JSON.parse(localStorage.getItem(FAV_KEY));
+    return Array.isArray(v) ? v : [];
+  } catch (e) { return []; }
+}
+
+/** 更新收藏计数文案（结论 + 关键词都反映进去，清空恢复时也要回到正确数字） */
+function updateFavSummary(count) {
+  const el = document.getElementById("fav-summary");
+  if (!el) return;
+  const kw = favKeyword.trim();
+  const parts = [];
+  if (favVerdictFilter !== VERDICT_ALL) parts.push("「" + favVerdictFilter + "」");
+  if (kw) parts.push("关键词「" + kw + "」");
+  el.textContent = (parts.length ? "筛选" + parts.join(" + ") + "：" : "") + "共 " + count + " 条";
+}
+
+/** 渲染收藏列表：结论 + 关键词叠加筛选；四种状态各自有明确出口，不留死胡同 */
+function renderFavView() {
+  const listEl = document.getElementById("fav-list");
+
+  // 数据未就绪：不能当成「零收藏」，否则会误报空态
+  if (!ALL_ITEMS.length) {
+    listEl.innerHTML = '<div class="empty-state">正在加载…</div>';
+    return;
+  }
+
+  const ids = getFavIds();
+  const owned = ALL_ITEMS.filter((it) => ids.indexOf(it.id) !== -1);
+
+  // 状态一：零数据（一条都没收藏）—— 文案必须与「筛空」不同，并给去获取数据的出口
+  if (!owned.length) {
+    listEl.innerHTML =
+      '<div class="empty-state">还没有收藏任何条目。去「热点卡片流」点开一条，在详情页按「☆ 收藏这条」就会出现在这里。' +
+      '<button type="button" class="empty-jump" id="fav-goto-feed">去卡片流看看</button></div>';
+    updateFavSummary(0);
+    const goBtn = document.getElementById("fav-goto-feed");
+    if (goBtn) {
+      goBtn.addEventListener("click", () => {
+        document.querySelector('#view-tabs .tab[data-view="feed"]').click();
+      });
+    }
+    return;
+  }
+
+  const kw = favKeyword.trim();
+  let items = favVerdictFilter === VERDICT_ALL
+    ? owned
+    : owned.filter((it) => it.verdict === favVerdictFilter);
+  if (kw) items = items.filter((it) => matchKeyword(it, kw)); // 关键词叠加在结论筛选之上
+
+  updateFavSummary(items.length);
+
+  // 状态二：无结果（筛了但没匹配）—— 统一文案 + 出口；若结论筛选也在，出口清掉全部条件
+  if (!items.length) {
+    const hasVerdict = favVerdictFilter !== VERDICT_ALL;
+    listEl.innerHTML =
+      '<div class="empty-state">没有找到相关内容' +
+      '<button type="button" class="empty-jump" id="fav-clear" data-mode="' +
+      (hasVerdict ? "all" : "kw") + '">' +
+      (hasVerdict ? "清空全部筛选" : "清空关键词") + "</button></div>";
+    const clearBtn = document.getElementById("fav-clear");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        favKeyword = "";
+        const search = document.getElementById("fav-search");
+        if (search) search.value = "";
+        if (clearBtn.dataset.mode === "all") { applyFavFilter(VERDICT_ALL); return; }
+        renderFavView();
+      });
+    }
+    return;
+  }
+
+  // 状态三 / 四：有结果（全部，或经结论/关键词筛选后的子集）
+  listEl.innerHTML = "";
+  items.forEach((it, i) => listEl.appendChild(renderCard(it, i)));
+}
+
+/** 应用收藏页的结论筛选（切换高亮 + 同步无障碍状态 + 重渲染） */
+function applyFavFilter(verdict) {
+  favVerdictFilter = verdict;
+  document.querySelectorAll("#fav-verdict-filter .chip").forEach((chip) => {
+    const on = chip.dataset.verdict === verdict;
+    chip.classList.toggle("active", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  renderFavView();
+}
+
+/** 绑定收藏视图：结论 chip + 关键词输入（输入即过滤，清空即恢复完整列表） */
+function initFavFilter() {
+  document.querySelectorAll("#fav-verdict-filter .chip").forEach((chip) => {
+    chip.addEventListener("click", () => applyFavFilter(chip.dataset.verdict));
+  });
+
+  const search = document.getElementById("fav-search");
+  if (search) {
+    search.addEventListener("input", (e) => {
+      favKeyword = e.target.value;
+      renderFavView();
+    });
+  }
+}
+
+/** 视图切换：卡片流 ↔ 辟谣榜 ↔ 我的收藏（辟谣榜内容第 3 步填充） */
 function initViewTabs() {
   const tabs = document.querySelectorAll("#view-tabs .tab");
   tabs.forEach((tab) => {
@@ -110,12 +273,14 @@ function initViewTabs() {
       document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
       document.getElementById("view-" + tab.dataset.view).classList.add("active");
       if (tab.dataset.view === "board") renderBoard(); // 切入榜单时立即渲染（修复：此前首次进入榜单是空白）
+      if (tab.dataset.view === "favs") renderFavView(); // 切入收藏时立即渲染（详情页刚收藏的要能看到）
     });
   });
 }
 
 initViewTabs();
 initFilter();
+initFavFilter();
 renderFeed();
 
 /* ============================================================
@@ -186,9 +351,10 @@ function renderBoard() {
   // 空状态：区分「榜内本来就没有」和「检索无结果」两种提示（PRD A3 / A4b）
   if (!items.length) {
     if (kw) {
-      // 检索无结果：提示换关键词（原逻辑不动）
+      // 检索无结果：统一文案「没有找到相关内容」+ 清空出口（清空后恢复该档完整列表）
       listEl.innerHTML =
-        '<div class="empty-state">没有匹配「' + kw + '」的辟谣条目，换个关键词试试</div>';
+        '<div class="empty-state">没有找到相关内容' +
+        '<button type="button" class="empty-jump" id="board-clear">清空关键词</button></div>';
       return;
     }
     // 当前档为空：若更长时间档有条目，给出指路按钮（修复：之前是死胡同，用户不知道数据其实在周/月/年榜里）
@@ -225,10 +391,17 @@ function initBoard() {
     renderBoard();
   });
 
-  // 空状态指路按钮：点击切换到更长时间档（事件委托，按钮是动态生成的）
+  // 空状态按钮（事件委托，按钮是动态生成的）：
+  //   「清空关键词」→ 恢复该档完整列表；「查看X榜」→ 切到更长的时间档
   document.getElementById("board-list").addEventListener("click", (e) => {
     const btn = e.target.closest(".empty-jump");
     if (!btn) return;
+    if (btn.id === "board-clear") {
+      boardKeyword = "";
+      document.getElementById("board-search").value = "";
+      renderBoard();
+      return;
+    }
     boardRange = btn.dataset.range;
     document.querySelectorAll("#board-tabs .tab").forEach((t) =>
       t.classList.toggle("active", t.dataset.range === boardRange)
