@@ -157,12 +157,13 @@ body {
 }
 .fav-btn { margin-left: 8px; background: #e0e3ec; color: var(--c-text); }
 .fav-btn:hover { background: #d0d4e2; }
-.fav-btn.fav-saved { background: var(--c-partial); color: #fff; }
-.fav-btn.fav-fail { background: var(--c-fake); color: #fff; }
+/* 状态反馈按钮：浅底深字（Day 12 同款路线）+ 同色描边保持按钮轮廓。
+   白字压橙/绿/红原色底只有 2.35~3.9:1，低于 AA 4.5:1，13px 小字必须达标。 */
+.fav-btn.fav-saved { background: var(--c-partial-soft); color: var(--c-partial-deep); border: 1px solid var(--c-partial); }
+.fav-btn.fav-fail { background: var(--c-fake-soft); color: var(--c-fake-deep); border: 1px solid var(--c-fake); }
 .fav-btn:disabled { opacity: .6; cursor: wait; }
-.copy-btn:hover { background: #2e49d6; }
-.copy-btn.copy-success { background: var(--c-true); animation: copiedPop .3s; }
-.copy-btn.copy-fail { background: var(--c-fake); }
+.copy-btn.copy-success { background: var(--c-true-soft); color: var(--c-true-deep); border: 1px solid var(--c-true); animation: copiedPop .3s; }
+.copy-btn.copy-fail { background: var(--c-fake-soft); color: var(--c-fake-deep); border: 1px solid var(--c-fake); }
 @keyframes copiedPop {
   0% { transform: scale(1); }
   45% { transform: scale(1.08); }
