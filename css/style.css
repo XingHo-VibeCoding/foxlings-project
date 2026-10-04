@@ -1,21 +1,30 @@
 /* ============================================
-   热门时事真伪辨别 · 全站样式（第 1 步骨架版）
-   动效规范：悬停浮起 / 切换淡入 / 卡片进场（第 2-3 步启用）
+   热门时事真伪辨别 · 全站样式
+   Day 15：v2 改版 —— C 卡片杂志骨架 + 装饰层
+     · 结构：顶部主色线 / 品牌区 + 三 tab + 右上角头像 / 榜单头 + 数据徽卡 /
+             筛选条 / 排行榜卡片（序号 + 结论色条 + 热度角标）/ 页脚装饰带
+     · 纪律：所有色值一律走 :root 变量（frontend-rules 硬门槛 C4：不准出现未登记裸色值）；
+             字号一律 12~22px（C7）；可点按钮一律 ≥44px（B5）
    ============================================ */
 
 :root {
+  /* ---- 主色与基础 ---- */
   --c-primary: #3b5bfd;      /* 主色：蓝 */
+  --c-primary-dark: #2e49d6; /* 主色加深：悬停态 */
   --c-bg: #f5f6fa;           /* 页面底色 */
   --c-card: #ffffff;         /* 卡片底色 */
+  --c-white: #ffffff;        /* 纯白（按钮文字用，与卡片底分开命名便于将来单独调整） */
   --c-text: #2a2f3c;         /* 正文 */
   --c-muted: #59606e;        /* 次要文字（实测 ≥5.5:1，达 WCAG 4.5 标准） */
-  --c-fake: #e5484d;         /* 结论：假（用于大面积色块 / 按钮） */
-  --c-partial: #e69913;      /* 结论：部分属实（同上） */
-  --c-true: #18a058;         /* 结论：真（同上） */
-  --c-doubt: #7069fa;        /* 结论：存疑（同上） */
 
-  /* 结论标签专用：浅底 + 深字。
-     标签是 12px 小字，属于 WCAG「小文本」，对比度必须 ≥4.5:1；
+  /* ---- 结论四色（用于大面积色块 / 按钮 / 色条） ---- */
+  --c-fake: #e5484d;         /* 结论：假 */
+  --c-partial: #e69913;      /* 结论：部分属实 */
+  --c-true: #18a058;         /* 结论：真 */
+  --c-doubt: #7069fa;        /* 结论：存疑 */
+
+  /* ---- 结论标签专用：浅底 + 深字 ----
+     标签是 12px 小字，属 WCAG「小文本」，对比度必须 ≥4.5:1；
      白字压原色底只有 2.35~4.13:1，不达标，故改用浅底深字（实测 5.8~6.9:1）。 */
   --c-fake-soft: #fdecec;
   --c-fake-deep: #a3121a;
@@ -25,6 +34,22 @@
   --c-true-deep: #0f6b3a;
   --c-doubt-soft: #efeffd;
   --c-doubt-deep: #4a44b8;
+
+  /* ---- 中性灰阶（Day 15 从散落硬编码收敛为变量，便于统一微调） ---- */
+  --c-line: #e8eaf1;         /* 常规分隔线 / 卡片默认色条 */
+  --c-line-soft: #eff1f7;    /* 更淡的分隔（区块之间） */
+  --c-summary: #4a5165;      /* 卡片摘要文字 */
+  --c-chip-bg: #e0e3ec;      /* 次级按钮底 */
+  --c-chip-hover: #d0d4e2;   /* 次级按钮悬停 */
+  --c-chip-border: #cdd2e0;  /* 描边按钮边框 */
+  --c-chip-text: #555555;    /* 描边按钮文字 */
+  --c-input-border: #d5d9e4; /* 输入框边框 */
+  --c-hover-bg: #eef1ff;     /* 浅色悬停底 */
+
+  /* ---- Day 15 装饰层新增 ---- */
+  --c-rank: #c9cfdf;         /* 榜单序号（大号淡数字，不抢内容） */
+  --c-stat-bg: #f2f4fb;      /* 数据徽卡底 */
+  --c-avatar-bg: #eef1ff;    /* 头像底（未用主色时） */
 
   --radius: 12px;
   --shadow: 0 2px 6px rgba(30, 40, 80, .08);
@@ -42,69 +67,129 @@ body {
 
 .container { max-width: 760px; margin: 0 auto; padding: 0 16px; }
 
-/* ---------- 页头 / 页脚 ---------- */
+/* ---------- 页头：装饰线 + 品牌区 + 导航 + 头像 ---------- */
 .site-header {
   background: var(--c-card);
-  border-bottom: 1px solid #e8eaf1;
-  padding: 16px 0;
+  border-top: 3px solid var(--c-primary);
+  border-bottom: 1px solid var(--c-line);
 }
-.site-title { font-size: 22px; }
-.site-slogan { font-size: 13px; color: var(--c-muted); margin-top: 4px; }
-.back-link { font-size: 13px; color: var(--c-primary); text-decoration: none; display: inline-block; margin-bottom: 8px; }
-.site-footer { text-align: center; padding: 24px 0 32px; font-size: 12px; color: var(--c-muted); }
 
-/* ---------- 视图切换标签 ---------- */
-.view-tabs { display: flex; gap: 8px; margin: 16px 0; }
-.tab {
-  border: none; padding: 12px 20px; border-radius: 20px; min-height: 44px;
-  font-size: 14px; cursor: pointer; background: #e0e3ec; color: #555;
-  transition: background .3s, color .3s;
+.brand-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+
+.brand { font-size: 16px; }
+.brand-link { display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none; color: inherit; }
+.brand-logo {
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  background: var(--c-primary); color: var(--c-white);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: bold;
 }
-.tab:not(.active):hover { background: #d0d4e2; }
-.tab.active { background: var(--c-primary); color: #fff; }
-:focus-visible { outline: 3px solid rgba(59, 91, 253, .45); outline-offset: 2px; }
+.brand-name { font-size: 16px; font-weight: bold; }
 
+.nav-tabs { display: flex; gap: 6px; }
+.nav-tab {
+  border: none; background: transparent; color: var(--c-muted);
+  padding: 10px 15px; min-height: 44px; border-radius: 22px;
+  font-size: 14px; cursor: pointer;
+  transition: background .25s, color .25s;
+}
+.nav-tab:hover { background: var(--c-hover-bg); color: var(--c-primary); }
+.nav-tab.active { background: var(--c-primary); color: var(--c-white); }
+.nav-tab.active:hover { background: var(--c-primary-dark); color: var(--c-white); }
+
+.avatar-btn {
+  margin-left: auto; width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+  background: var(--c-avatar-bg); color: var(--c-primary);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: bold; text-decoration: none;
+  transition: background .25s, color .25s;
+}
+.avatar-btn:hover { background: var(--c-primary); color: var(--c-white); }
+
+/* 手机：品牌 + 头像一行，导航整行落到第二行（避免 360px 下挤爆） */
+@media (max-width: 640px) {
+  .nav-tabs { order: 3; width: 100%; justify-content: space-between; }
+  .nav-tab { flex: 1; text-align: center; }
+}
+
+/* ---------- 视图头：大标题 + 数据徽卡 ---------- */
+.view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 20px 0 14px; }
+.view-title { font-size: 22px; line-height: 1.3; }
+.view-sub { font-size: 13px; color: var(--c-muted); margin-top: 2px; }
+.stat-row { display: flex; gap: 8px; }
+.stat-card { background: var(--c-stat-bg); border-radius: 10px; padding: 7px 14px; text-align: center; min-width: 76px; }
+.stat-num { display: block; font-size: 18px; font-weight: bold; color: var(--c-primary); line-height: 1.3; }
+.stat-label { display: block; font-size: 12px; color: var(--c-muted); }
+
+/* ---------- 视图切换 ---------- */
 .view { display: none; }
 .view.active { display: block; animation: fadeIn .35s both; }
 
-/* ---------- Day 12：结论筛选器 ---------- */
+/* ---------- 筛选层 ---------- */
+.board-toolbar { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.board-tabs { display: flex; gap: 6px; }
+.tab {
+  border: none; padding: 10px 16px; border-radius: 20px; min-height: 44px;
+  font-size: 14px; cursor: pointer; background: var(--c-chip-bg); color: var(--c-chip-text);
+  transition: background .3s, color .3s;
+}
+.tab:not(.active):hover { background: var(--c-chip-hover); }
+.tab.active { background: var(--c-primary); color: var(--c-white); }
+:focus-visible { outline: 3px solid rgba(59, 91, 253, .45); outline-offset: 2px; }
+
 .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
 .chip {
-  border: 1px solid #cdd2e0; background: var(--c-card); color: var(--c-text);
+  border: 1px solid var(--c-chip-border); background: var(--c-card); color: var(--c-text);
   padding: 10px 16px; min-height: 44px; border-radius: 20px; font-size: 13px; cursor: pointer;
   transition: background .25s, border-color .25s, color .25s;
 }
-.chip:hover { background: #eef1ff; border-color: var(--c-primary); }
-.chip.active { background: var(--c-primary); border-color: var(--c-primary); color: #fff; }
+.chip:hover { background: var(--c-hover-bg); border-color: var(--c-primary); }
+.chip.active { background: var(--c-primary); border-color: var(--c-primary); color: var(--c-white); }
 .filter-summary { font-size: 12px; color: var(--c-muted); margin-bottom: 12px; }
 
-/* Day 12 延伸：关键词筛选框（卡片流 / 信源比对共用，与 .board-search 同族视觉） */
-.filter-search {
-  width: 100%; border: 1px solid #d5d9e4; border-radius: 20px;
+.filter-search,
+.board-search {
+  width: 100%; border: 1px solid var(--c-input-border); border-radius: 20px;
   padding: 12px 16px; font-size: 13px; min-height: 44px;
   outline: none; margin: 4px 0 12px; transition: box-shadow .3s;
+  background: var(--c-card); color: var(--c-text);
 }
-.filter-search:focus { box-shadow: 0 0 0 3px rgba(59, 91, 253, .15); }
+.filter-search:focus,
+.board-search:focus { box-shadow: 0 0 0 3px rgba(59, 91, 253, .15); border-color: var(--c-primary); }
+.board-search { flex: 1; min-width: 160px; margin: 0; }
 
-/* ---------- 卡片（第 2 步填充内容） ---------- */
+/* ---------- 排行榜卡片 ---------- */
 .card-list { display: flex; flex-direction: column; gap: 12px; padding-bottom: 24px; }
 .card {
+  display: flex; gap: 14px;
   background: var(--c-card); border-radius: var(--radius);
   padding: 16px; box-shadow: var(--shadow);
-  transition: transform .25s, box-shadow .25s;
+  border-left: 4px solid var(--c-line);
+  text-decoration: none; color: inherit;
+  transition: transform .25s, box-shadow .25s, border-left-color .25s;
 }
 .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-hover); }
 
-/* 卡片内文字（第 2 步启用） */
-.card { display: block; text-decoration: none; color: inherit; }
+/* 榜单序号：大号淡数字，扫一眼就知道这是「榜」 */
+.card-rank { font-size: 22px; font-weight: bold; color: var(--c-rank); line-height: 1.1; width: 34px; flex-shrink: 0; }
+.card-body { flex: 1; min-width: 0; }
+
+/* 结论色条：颜随结论走，不读字也能扫出结论分布 */
+.card[data-verdict="假"] { border-left-color: var(--c-fake); }
+.card[data-verdict="部分属实"] { border-left-color: var(--c-partial); }
+.card[data-verdict="真"] { border-left-color: var(--c-true); }
+.card[data-verdict="存疑"] { border-left-color: var(--c-doubt); }
+.card:hover[data-verdict="假"] { border-left-color: var(--c-fake); }
+
+.card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .card-date { font-size: 12px; color: var(--c-muted); }
 .card-title { font-size: 16px; margin: 8px 0; }
-.card-summary { font-size: 13px; color: #4a5165; margin-bottom: 8px; }
+.card-summary { font-size: 13px; color: var(--c-summary); margin-bottom: 8px; }
 .card-meta { font-size: 12px; color: var(--c-muted); }
 
 .tag {
   display: inline-block; font-size: 12px; padding: 4px 12px;
-  border-radius: 12px; margin-right: 8px; vertical-align: middle;
+  border-radius: 12px; vertical-align: middle;
 }
 /* 浅底 + 深字：12px 小字对比度实测 5.8~6.9:1，达 WCAG AA */
 .tag-假 { background: var(--c-fake-soft); color: var(--c-fake-deep); }
@@ -112,16 +197,13 @@ body {
 .tag-真 { background: var(--c-true-soft); color: var(--c-true-deep); }
 .tag-存疑 { background: var(--c-doubt-soft); color: var(--c-doubt-deep); }
 
-/* ---------- 辟谣榜工具条（第 3 步启用） ---------- */
-.board-toolbar { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
-.board-tabs { display: flex; gap: 8px; }
-.board-search {
-  flex: 1; min-width: 180px; border: 1px solid #d5d9e4; border-radius: 20px;
-  padding: 12px 16px; font-size: 13px; outline: none; transition: box-shadow .3s;
+/* 热度角标（装饰 D5）：沿用「部分属实」的暖色对，保证 4.5:1 达标 */
+.heat-badge {
+  display: inline-block; font-size: 12px; padding: 3px 9px; border-radius: 10px;
+  background: var(--c-partial-soft); color: var(--c-partial-deep);
 }
-.board-search:focus { box-shadow: 0 0 0 3px rgba(59, 91, 253, .15); }
 
-/* ---------- 详情页（第 4 步启用） ---------- */
+/* ---------- 详情页 ---------- */
 .detail-head { margin: 18px 0; }
 .detail-section { background: var(--c-card); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; box-shadow: var(--shadow); }
 .detail-section h2 { font-size: 16px; margin-bottom: 12px; }
@@ -141,22 +223,18 @@ body {
 .src-name { font-size: 14px; font-weight: bold; color: var(--c-primary); }
 .src-open { font-size: 12px; color: var(--c-muted); }
 .detail-title { font-size: 18px; margin: 8px 0 6px; }
-.cross-check { margin-top: 12px; font-size: 13px; padding: 12px 16px; background: #eef1ff; border-radius: 8px; }
+.cross-check { margin-top: 12px; font-size: 13px; padding: 12px 16px; background: var(--c-hover-bg); border-radius: 8px; }
 
-/* ---------- Day 11：复制结论按钮（点击反馈：变身 + 弹跳） ---------- */
-.copy-btn:hover { background: #2e49d6; }
-.copy-btn.copy-success { background: var(--c-true); animation: copiedPop .3s; }
-.copy-btn.copy-fail { background: var(--c-fake); }
-
-/* Day 11 模板练习：收藏按钮（与复制按钮同排同尺寸，布局不变） */
+/* ---------- 复制 / 收藏按钮（Day 11，含状态反馈） ---------- */
 .copy-btn, .fav-btn {
   display: inline-block; border: none; padding: 10px 18px; margin-top: 12px;
   border-radius: 20px; min-height: 44px;
-  font-size: 13px; cursor: pointer; background: var(--c-primary); color: #fff;
-  transition: background .25s;
+  font-size: 13px; cursor: pointer; background: var(--c-primary); color: var(--c-white);
+  transition: background .25s, color .25s, border-color .25s;
 }
-.fav-btn { margin-left: 8px; background: #e0e3ec; color: var(--c-text); }
-.fav-btn:hover { background: #d0d4e2; }
+.copy-btn:hover { background: var(--c-primary-dark); }
+.fav-btn { margin-left: 8px; background: var(--c-chip-bg); color: var(--c-text); }
+.fav-btn:hover { background: var(--c-chip-hover); }
 /* 状态反馈按钮：浅底深字（Day 12 同款路线）+ 同色描边保持按钮轮廓。
    白字压橙/绿/红原色底只有 2.35~3.9:1，低于 AA 4.5:1，13px 小字必须达标。 */
 .fav-btn.fav-saved { background: var(--c-partial-soft); color: var(--c-partial-deep); border: 1px solid var(--c-partial); }
@@ -170,24 +248,21 @@ body {
   100% { transform: scale(1); }
 }
 
-/* ---------- 空状态 / 加载中 ---------- */
+/* ---------- 空状态 / 加载中 / 错误 ---------- */
 .empty-state {
   text-align: center; color: var(--c-muted); padding: 32px 0; font-size: 13px;
   background: var(--c-card); border-radius: var(--radius);
 }
-/* 空状态里的「查看更长档位」按钮：与 .tab 同风格，44px 触控高度 */
 .empty-jump {
   border: none; padding: 10px 18px; margin-left: 4px; border-radius: 20px; min-height: 44px;
-  font-size: 13px; cursor: pointer; background: var(--c-primary); color: #fff;
-  transition: background .3s;
+  font-size: 13px; cursor: pointer; background: var(--c-primary); color: var(--c-white);
+  transition: background .3s; text-decoration: none; display: inline-block;
 }
-.empty-jump:hover { background: #2e49d6; }
+.empty-jump:hover { background: var(--c-primary-dark); }
 
-/* ---------- Day 13：四种状态（加载中 / 空 / 错误 / 正常） ---------- */
-/* 加载中：转圈 + 文案（不只靠动画表达，读屏也能读到文字） */
 .spinner {
   display: inline-block; width: 14px; height: 14px; margin-right: 8px;
-  vertical-align: -2px; border: 2px solid #cdd2e0; border-top-color: var(--c-primary);
+  vertical-align: -2px; border: 2px solid var(--c-chip-border); border-top-color: var(--c-primary);
   border-radius: 50%; animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -205,12 +280,73 @@ body {
   font-size: 13px;
 }
 
-/* ---------- Day 13 余力加练：面包屑 ---------- */
+/* ---------- 面包屑 ---------- */
 .breadcrumb { font-size: 12px; color: var(--c-muted); margin-top: 16px; display: flex; gap: 6px; align-items: center; }
 .breadcrumb a { color: var(--c-primary); text-decoration: none; }
 .breadcrumb a:hover { text-decoration: underline; }
-.breadcrumb .crumb-sep { color: var(--c-muted); }
+.crumb-sep { color: var(--c-muted); }
 .breadcrumb [aria-current="page"] { color: var(--c-text); }
+
+/* ---------- 占位视图（查询检索 / 论坛，本期未开工） ---------- */
+.placeholder {
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 28px 20px; text-align: center;
+}
+.placeholder-icon {
+  width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 14px;
+  background: var(--c-hover-bg); color: var(--c-primary);
+  display: flex; align-items: center; justify-content: center; font-size: 20px;
+}
+.placeholder-lead { font-size: 17px; margin-bottom: 8px; }
+.placeholder p { font-size: 13px; color: var(--c-muted); max-width: 460px; margin: 0 auto 6px; }
+.placeholder .soon {
+  display: inline-block; margin-top: 12px; font-size: 12px; padding: 4px 12px; border-radius: 12px;
+  background: var(--c-doubt-soft); color: var(--c-doubt-deep);
+}
+
+/* ---------- 个人主页（P1 本地版） ---------- */
+.mine-card { background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; margin-bottom: 16px; }
+.mine-card h2 { font-size: 16px; margin-bottom: 10px; }
+.mine-about { font-size: 13px; color: var(--c-muted); }
+.mine-about dt { font-size: 13px; font-weight: bold; color: var(--c-text); margin-top: 10px; }
+.mine-about dd { font-size: 13px; color: var(--c-muted); margin-left: 0; }
+.mine-list { display: flex; flex-direction: column; gap: 10px; }
+.mine-item {
+  display: flex; gap: 10px; align-items: baseline; justify-content: space-between;
+  text-decoration: none; color: inherit; padding: 10px 12px;
+  background: var(--c-bg); border-radius: 8px; font-size: 13px;
+  transition: background .25s;
+}
+.mine-item:hover { background: var(--c-hover-bg); }
+.mine-item-title { flex: 1; min-width: 0; }
+.mine-item-date { font-size: 12px; color: var(--c-muted); flex-shrink: 0; }
+.mine-count { font-size: 13px; color: var(--c-muted); font-weight: normal; }
+.mine-report { align-items: center; }
+
+.rep-input {
+  width: 100%; border: 1px solid var(--c-input-border); border-radius: 10px;
+  padding: 12px; font-size: 13px; resize: vertical; font-family: inherit;
+  outline: none; margin: 10px 0; background: var(--c-card); color: var(--c-text);
+  transition: box-shadow .3s;
+}
+.rep-input:focus { box-shadow: 0 0 0 3px rgba(59, 91, 253, .15); border-color: var(--c-primary); }
+.rep-del {
+  border: 1px solid var(--c-chip-border); background: var(--c-card); color: var(--c-muted);
+  font-size: 12px; padding: 6px 12px; border-radius: 12px; cursor: pointer; min-height: 36px;
+  flex-shrink: 0; transition: background .25s, color .25s, border-color .25s;
+}
+.rep-del:hover { background: var(--c-fake-soft); color: var(--c-fake-deep); border-color: var(--c-fake); }
+
+/* ---------- 页脚 ---------- */
+.site-footer {
+  background: var(--c-card); border-top: 3px solid var(--c-primary);
+  text-align: center; padding: 20px 0 26px; font-size: 12px; color: var(--c-muted);
+  margin-top: 8px;
+}
+.site-footer p { margin-bottom: 4px; }
+.footer-links { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.footer-links a { color: var(--c-primary); text-decoration: none; font-size: 12px; }
+.footer-links a:hover { text-decoration: underline; }
 
 /* ---------- 动画 ---------- */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }

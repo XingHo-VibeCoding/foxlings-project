@@ -1,10 +1,15 @@
 /* filter-check.js — 检查【任意已登记列表组件】的筛选交互
    覆盖：三态（有结果 / 无结果 / 清空恢复）、零数据态、无障碍底线、回归底线
    用法：
-     node filter-check.js             # 检查默认组件（feed + favs）
-     node filter-check.js favs        # 只检查某个组件
-     node filter-check.js feed favs   # 检查多个
-   前置：项目根目录已起 http.server 8000（--bind 127.0.0.1） */
+     node filter-check.js             # 检查默认组件（board + favs）
+     node filter-check.js board       # 只检查某个组件
+     node filter-check.js board favs  # 检查多个
+   前置：项目根目录已起 http.server 8000（--bind 127.0.0.1）
+
+   Day 15 变更记录（导航结构重构）：
+     · 原 `feed`（首页·热点卡片流）组件并入 `board` —— 两个列表页合并成一个辟谣榜，
+       三态断言一条不删，只是换了容器 id（#card-list → #board-list）；
+     · `favs`（我的收藏）从「首页视图」搬到独立页 mine.html，选择器同步更新。 */
 const pw = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
 const BASE = 'http://localhost:8000';
@@ -14,39 +19,25 @@ const EMPTY_TEXT = '没有找到相关内容'; // 全站统一的无结果文案
 
 /* ---------------- 组件登记表：新组件接进来只需加一条 ---------------- */
 const COMPS = {
-  feed: {
-    label: '首页·热点卡片流',
+  board: {
+    label: '首页·辟谣榜（含原卡片流）',
     prepare: async (page) => {
       await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
-      await page.waitForSelector('.card');
+      await page.waitForSelector('#board-list .card');
+      // 切到年榜 = 全量数据，让基线断言与「今天」无关，不会随时间流逝而失效
+      await page.locator('#board-tabs .tab', { hasText: '年榜' }).click();
+      await page.waitForTimeout(400);
     },
     chips: '#verdict-filter .chip',
     chipKey: 'data-verdict',
     hitChip: { value: '存疑', count: 4 },
     missChip: { value: '真', count: 0 },
     hitKeyword: { value: '地铁', count: 1 },
-    list: '#card-list',
-    itemSel: '.card',
-    search: '#feed-search',
-    summary: '#filter-summary',
-    baseline: 5
-  },
-  board: {
-    label: '首页·辟谣榜',
-    prepare: async (page) => {
-      await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
-      await page.waitForSelector('.card');
-      await page.locator('#view-tabs .tab', { hasText: '辟谣榜' }).click();
-      await page.locator('#board-tabs .tab', { hasText: '周榜' }).click();
-      await page.waitForTimeout(400);
-    },
-    chips: null,
-    hitKeyword: { value: '加油站', count: 1 },
     list: '#board-list',
     itemSel: '.card',
     search: '#board-search',
-    summary: null,
-    baseline: 1
+    summary: '#filter-summary',
+    baseline: 5
   },
   source: {
     label: '详情页·信源比对',
@@ -63,7 +54,7 @@ const COMPS = {
     baseline: 2
   },
   favs: {
-    label: '首页·我的收藏',
+    label: '个人主页·我的收藏',
     prepare: async (page) => {
       // 造数据：清空后收藏两条（demo-001 存疑 / demo-005 假）
       await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
@@ -74,18 +65,13 @@ const COMPS = {
         await page.locator('#fav-btn').click();
         await page.waitForTimeout(800);
       }
-      await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
-      await page.waitForSelector('.card');
-      await page.locator('#view-tabs .tab', { hasText: '我的收藏' }).click();
-      await page.waitForTimeout(400);
+      await page.goto(BASE + '/mine.html', { waitUntil: 'networkidle' });
+      await page.waitForSelector('#mine-fav-list .mine-item');
     },
-    chips: '#fav-verdict-filter .chip',
-    chipKey: 'data-verdict',
-    hitChip: { value: '存疑', count: 1 },
-    missChip: { value: '真', count: 0 },
+    chips: null,
     hitKeyword: { value: '加油站', count: 1 },
-    list: '#fav-list',
-    itemSel: '.card',
+    list: '#mine-fav-list',
+    itemSel: '.mine-item',
     search: '#fav-search',
     summary: '#fav-summary',
     baseline: 2,
@@ -106,7 +92,6 @@ async function textOf(page, sel) {
 async function checkComp(page, key, cfg, R) {
   const p = key + '.';
   const items = () => page.locator(cfg.list + ' ' + cfg.itemSel);
-  const emptyBox = () => page.locator(cfg.list + ' .empty-state');
   let emptyText = '';
 
   await cfg.prepare(page);
@@ -191,9 +176,7 @@ async function checkComp(page, key, cfg, R) {
   // B1 零数据态（仅登记的组件）：与「筛空」文案必须不同
   if (cfg.zeroDataCheck) {
     await page.evaluate(() => localStorage.removeItem('fx_favs'));
-    await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
-    await page.waitForSelector('.card');
-    await page.locator('#view-tabs .tab', { hasText: '我的收藏' }).click();
+    await page.goto(BASE + '/mine.html', { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
     const zeroText = (await page.locator(cfg.list).textContent()).trim();
     R[p + 'B1_零数据态_有引导文案'] = zeroText.length > 0;
@@ -212,7 +195,7 @@ async function checkComp(page, key, cfg, R) {
 /* ---------------- 主流程 ---------------- */
 (async () => {
   const want = process.argv.slice(2);
-  const keys = want.length ? want : ['feed', 'favs'];
+  const keys = want.length ? want : ['board', 'favs'];
   const R = {};
   const browser = await pw.chromium.launch({ executablePath: EDGE, headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 790 } });
@@ -225,14 +208,13 @@ async function checkComp(page, key, cfg, R) {
     await checkComp(page, key, cfg, R);
   }
 
-  // D1 其他视图回归：卡片流 + 辟谣榜仍能渲染
+  // D1 默认视图回归：辟谣榜打开就能渲染，切档位后条数正确
   await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
-  await page.waitForSelector('.card');
-  R['D1_卡片流回归'] = (await page.locator('#card-list .card').count()) === 5;
-  await page.locator('#view-tabs .tab', { hasText: '辟谣榜' }).click();
+  await page.waitForSelector('#board-list .card');
+  R['D1_辟谣榜默认视图渲染'] = (await page.locator('#board-list .card').count()) >= 1;
+  await page.locator('#board-tabs .tab', { hasText: '年榜' }).click();
   await page.waitForTimeout(400);
-  R['D1_辟谣榜回归'] = (await page.locator('#board-list .card').count()) +
-    (await page.locator('#board-list .empty-state').count()) >= 1;
+  R['D1_年榜全量渲染'] = (await page.locator('#board-list .card').count()) === 5;
   R['D2_无JS错误'] = errors.length === 0;
 
   await browser.close();

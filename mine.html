@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>个人主页 · 热门时事真伪辨别</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container brand-row">
+      <h1 class="brand">
+        <a class="brand-link" href="index.html#/board">
+          <span class="brand-logo" aria-hidden="true">真</span>
+          <span class="brand-name">热门时事真伪辨别</span>
+        </a>
+      </h1>
+      <a class="avatar-btn" href="index.html#/board" aria-label="返回首页">创</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <nav class="breadcrumb" aria-label="面包屑">
+      <a href="index.html">首页</a>
+      <span class="crumb-sep" aria-hidden="true">›</span>
+      <span aria-current="page">个人主页</span>
+    </nav>
+
+    <div class="view-head">
+      <div>
+        <h2 class="view-title">我的主页</h2>
+        <p class="view-sub">收藏、足迹和线索都只存在这台设备上，不上传任何数据</p>
+      </div>
+    </div>
+
+    <!-- ① 我的收藏（读详情页收藏的记录，键：fx_favs） -->
+    <section class="mine-card">
+      <h2>我的收藏</h2>
+      <input type="search" id="fav-search" class="filter-search"
+             placeholder="输入关键词筛选收藏…" aria-label="按关键词筛选收藏">
+      <p class="filter-summary" id="fav-summary" aria-live="polite">共 0 条</p>
+      <div id="mine-fav-list" class="card-list"></div>
+    </section>
+
+    <!-- ② 浏览足迹（进过详情页就记一笔，键：fx_history） -->
+    <section class="mine-card">
+      <h2>浏览足迹 <span class="mine-count" id="hist-count"></span></h2>
+      <div id="hist-list" class="mine-list"></div>
+    </section>
+
+    <!-- ③ 我提交的待核查（本地暂存；论坛开通后可一键发布） -->
+    <section class="mine-card">
+      <h2>我提交的待核查 <span class="mine-count" id="rep-count"></span></h2>
+      <p class="mine-about">看到查不到出处的消息？先记在这里——只存在本机，论坛开通后可一键发布给大家一起溯源。</p>
+      <textarea id="rep-input" class="rep-input" rows="2"
+                placeholder="一句话描述你看到的说法 + 在哪看到的（如：某微信群说……）"
+                aria-label="记录一条待核查线索"></textarea>
+      <button type="button" class="empty-jump" id="rep-add">记下这条线索</button>
+      <div id="rep-list" class="mine-list"></div>
+    </section>
+
+    <!-- ④ 关于本站与方法论 -->
+    <section class="mine-card" id="about">
+      <h2>关于本站与方法论</h2>
+      <dl class="mine-about">
+        <dt>这个站是干什么的</dt>
+        <dd>当一条热门消息刷屏时，给你一个快速、说人话的地方查「这事是真的假的」。</dd>
+        <dt>结论标签怎么读</dt>
+        <dd>真 = 有权威信源相互印证；假 = 权威信源明确否认，或有硬证据与之矛盾；部分属实 = 关键细节被夸大或断章取义；存疑 = 目前找不到足够权威信源，说不准——这是合法的答案，本站不硬编结论。</dd>
+        <dt>为什么有的条目写「溯源中断」</dt>
+        <dd>群聊、已删视频这类内容查不到最早出处是常态。宁可诚实标注「查不到」，也不编一个出处给你。</dd>
+        <dt>自己怎么验一条消息</dt>
+        <dd>① 找最早出处，看原始发布者是谁；② 搜权威媒体有没有报道（新华社、央视、人民网、当地官方通报）；③ 搜「辟谣 + 关键词」，看有没有已被戳穿的记录；④ 看时间线是否矛盾——旧闻新发是最常见的套路。</dd>
+      </dl>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>本站是帮助用户自查的辅助工具，不是下结论的判官 · 数据人工整理 · 每条信源可点开验证</p>
+    </div>
+  </footer>
+
+  <script src="js/data.js"></script>
+  <script src="js/mine.js"></script>
+</body>
+</html>

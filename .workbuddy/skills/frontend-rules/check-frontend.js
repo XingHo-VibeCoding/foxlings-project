@@ -2,7 +2,13 @@
    六组检查：L 页面层级 / C 颜色与字体 / B 卡片与按钮 / M 移动端 / R 回归底线 / O 观察项
    用法：node check-frontend.js   （需先在项目根目录起 http.server 8000 --bind 127.0.0.1）
    硬门槛（L/C/B/M/R）有任一失败 → 打印 FAIL 行并以退出码 1 结束
-   观察项（O）只报告不阻塞，需由项目主人拍板 */
+   观察项（O）只报告不阻塞，需由项目主人拍板
+
+   Day 15 变更记录（导航结构重构）：
+     导航从「首页内三个同页视图」改为「三个主 tab + 个人主页独立页」，
+     因此 N 组与 L4 的断言由「写死 #view-feed / #tab-feed」改为「读 data-view 动态推导」，
+     **断言强度不变**：首屏落位并规范化 hash、切视图地址栏同步、刷新保持、后退可用、
+     非法 hash 回落默认视图、四种状态齐备——一条都没少，只是不再假设视图叫什么名字。 */
 const fs = require('fs');
 const PW = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
@@ -19,6 +25,7 @@ const css = fs.readFileSync(ROOT + '/css/style.css', 'utf8');
 const pages = {
   index: fs.readFileSync(ROOT + '/index.html', 'utf8'),
   detail: fs.readFileSync(ROOT + '/detail.html', 'utf8'),
+  mine: fs.readFileSync(ROOT + '/mine.html', 'utf8'),
 };
 
 // 取出 :root 里成对的变量名 → 色值
@@ -123,32 +130,42 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
   await page.goto(BASE, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.card');
+  await page.waitForSelector('#board-list .card');
 
   /* ---- L2/L3 运行时结构 ---- */
   R['L1_容器宽760'] = (await page.locator('.container').first().evaluate(
     (el) => getComputedStyle(el).maxWidth)) === '760px';
   R['L2_单视图可见'] = (await page.locator('.view.active').count()) === 1;
   const viewCount = await page.locator('.view').count();
-  const tabBtnCount = await page.locator('#view-tabs button.tab').count();
+  const tabBtnCount = await page.locator('#view-tabs button.nav-tab').count();
   R['L2_视图数与tab数一致'] = viewCount === tabBtnCount && viewCount >= 2;
   R['L3_视图切换生效'] = await (async () => {
     const before = await page.locator('.view.active').getAttribute('id');
-    await page.locator('#view-tabs button.tab').nth(1).click();
+    await page.locator('#view-tabs button.nav-tab').nth(1).click();
     await page.waitForTimeout(350);
     const after = await page.locator('.view.active').getAttribute('id');
-    await page.locator('#view-tabs button.tab').nth(0).click();
+    await page.locator('#view-tabs button.nav-tab').nth(0).click();
     await page.waitForTimeout(350);
     return before !== after;
   })();
   // tab 必须是原生 button（键盘天然可达），不能用 div 冒充
   R['L3_tab是原生button'] = tabBtnCount >= 2;
-  R['L4_视图有aria标签'] = !!(await page.locator('#view-feed').getAttribute('aria-label'));
+  // 每个视图都要有 aria-label；标签要能对上一个视图
+  R['L4_视图有aria标签'] = await (async () => {
+    const views = await page.locator('.view').all();
+    for (const v of views) {
+      const label = await v.getAttribute('aria-label');
+      const labelledby = await v.getAttribute('aria-labelledby');
+      if (!label && !labelledby) return false;
+    }
+    const controls = await page.locator('#view-tabs button.nav-tab').first().getAttribute('aria-controls');
+    return !!(await page.locator('#' + controls).count());
+  })();
   R['L4_筛选器容器语义'] = (await page.locator('#verdict-filter').getAttribute('role')) === 'group'
     && !!(await page.locator('#verdict-filter').getAttribute('aria-label'));
 
   /* ---- B1/B3 卡片形态 ---- */
-  const card = page.locator('.card').first();
+  const card = page.locator('#board-list .card').first();
   R['B1_卡片圆角为变量值'] = (await card.evaluate((el) => getComputedStyle(el).borderRadius)) === '12px';
   R['B1_卡片有阴影'] = (await card.evaluate((el) => getComputedStyle(el).boxShadow)) !== 'none';
   R['B2_卡片是链接'] = (await card.evaluate((el) => el.tagName)) === 'A';
@@ -183,6 +200,20 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     if (fg && bg) O[`标签实测对比度_${k}`] = r2(cr(fg, bg));
   });
 
+  // 装饰角标（热度）同样是小字浅底深字，一并纳入实测
+  const badgePairs = await page.evaluate(() => {
+    const el = document.querySelector('.heat-badge');
+    if (!el) return null;
+    return { fg: getComputedStyle(el).color, bg: getComputedStyle(el).backgroundColor };
+  });
+  if (badgePairs) {
+    const fg = rgb2hex(badgePairs.fg), bg = rgb2hex(badgePairs.bg);
+    R['C2b_热度角标实测_达标'] = !!(fg && bg) && cr(fg, bg) >= 4.5;
+    if (fg && bg) O['热度角标实测对比度'] = r2(cr(fg, bg));
+  } else {
+    O['热度角标实测对比度'] = '页面上没出现 .heat-badge';
+  }
+
   // B1 hover 有反馈
   await card.hover();
   await page.waitForTimeout(400);
@@ -202,75 +233,89 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   /* ---- B7 焦点环 ---- */
   R['B7_有focus-visible规则'] = /:focus-visible\s*\{[^}]*outline:/.test(css);
 
-  /* ---- M1 三个宽度 × 三个场景的溢出 ---- */
+  /* ---- M1 三档宽度 × 五个页面的溢出 ----
+     Day 15 起覆盖面从「首页 + 详情页」扩到「三视图 + 详情页 + 个人主页」 */
   const widths = [375, 768, 1280];
+  const views = ['board', 'search', 'forum'];
   let totalOverflow = 0;
   for (const w of widths) {
     await page.setViewportSize({ width: w, height: 790 });
-    await page.goto(BASE, { waitUntil: 'networkidle' });
-    await page.waitForSelector('.card');
-    totalOverflow += await overflowNow();                       // 首页·卡片流
-    await page.locator('#view-tabs .tab', { hasText: '辟谣榜' }).click();
-    await page.waitForTimeout(350);
-    totalOverflow += await overflowNow();                       // 首页·辟谣榜
+    for (const v of views) {
+      await page.goto(BASE + '/#/' + v, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(350);
+      totalOverflow += await overflowNow();
+    }
     await page.goto(BASE + '/detail.html?id=demo-005', { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
-    totalOverflow += await overflowNow();                       // 详情页
+    totalOverflow += await overflowNow();
+    await page.goto(BASE + '/mine.html', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+    totalOverflow += await overflowNow();
   }
   R['M1_三档零横向溢出'] = totalOverflow === 0;
   O['M1_溢出合计px'] = totalOverflow;
 
-  /* ---- N 组：视图路由与四种状态（Day 13 新增规范） ---- */
+  /* ---- N 组：视图路由与四种状态（结构无关写法，Day 15 改） ---- */
+  await page.setViewportSize({ width: 1280, height: 790 });
   await page.goto(BASE, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.card');
+  await page.waitForSelector('#board-list .card');
   const hashOf = () => page.evaluate(() => location.hash);
   const viewIdOf = () => page.evaluate(() => (document.querySelector('.view.active') || {}).id || '');
+  const tabView = (i) => page.locator('#view-tabs .nav-tab').nth(i).getAttribute('data-view');
 
-  // N1 首屏：默认落在卡片流，且地址栏被规范化成 #/feed
-  R['N1_首屏落位并规范化hash'] = (await viewIdOf()) === 'view-feed' && (await hashOf()) === '#/feed';
+  // N1 首屏：落在默认视图，且地址栏被规范化成对应 hash
+  R['N1_首屏落位并规范化hash'] = await (async () => {
+    const id = (await viewIdOf()) || '';
+    return id.indexOf('view-') === 0 && (await hashOf()) === '#/' + id.slice(5);
+  })();
 
-  // N6 导航标签的无障碍语义（tablist + aria-selected + aria-controls）
+  // N6 导航标签的无障碍语义（tablist + aria-selected + aria-controls 指到真视图）
   R['N6_标签是tablist语义'] = await (async () => {
     const listRole = await page.locator('#view-tabs').getAttribute('role');
-    const selected = await page.locator('#tab-feed').getAttribute('aria-selected');
-    const controls = await page.locator('#tab-feed').getAttribute('aria-controls');
-    return listRole === 'tablist' && selected === 'true' && controls === 'view-feed';
+    const first = page.locator('#view-tabs .nav-tab').first();
+    const selected = await first.getAttribute('aria-selected');
+    const controls = await first.getAttribute('aria-controls');
+    const dv = await first.getAttribute('data-view');
+    return listRole === 'tablist' && selected === 'true' &&
+      controls === 'view-' + dv && (await page.locator('#' + controls).count()) === 1;
   })();
 
   // N2 切视图时地址栏同步（路由的核心：视图 = 可分享的地址）
-  await page.locator('#view-tabs .tab', { hasText: '辟谣榜' }).click();
+  const firstView = await tabView(0);
+  const secondView = await tabView(1);
+  await page.locator('#view-tabs .nav-tab').nth(1).click();
   await page.waitForTimeout(400);
-  R['N2_切视图地址栏同步'] = (await viewIdOf()) === 'view-board' && (await hashOf()) === '#/board';
+  R['N2_切视图地址栏同步'] = (await viewIdOf()) === 'view-' + secondView && (await hashOf()) === '#/' + secondView;
 
   // N3 刷新后仍停在同一视图（纯 class 切换做不到这条）
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForTimeout(500);
-  R['N3_刷新保持当前视图'] = (await viewIdOf()) === 'view-board';
+  R['N3_刷新保持当前视图'] = (await viewIdOf()) === 'view-' + secondView;
 
-  // N4 浏览器后退可用（余力加练：返回上一页）
+  // N4 浏览器后退可用
   await page.goBack();
   await page.waitForTimeout(500);
-  R['N4_浏览器后退可用'] = (await viewIdOf()) === 'view-feed';
+  R['N4_浏览器后退可用'] = (await viewIdOf()) === 'view-' + firstView;
 
   // N5 非法 hash 必须回落默认视图，不能白屏
   await page.goto(BASE + '/#/没有这个视图', { waitUntil: 'networkidle' });
   await page.waitForTimeout(400);
-  R['N5_非法hash回落默认视图'] = (await viewIdOf()) === 'view-feed';
+  R['N5_非法hash回落默认视图'] = (await viewIdOf()) === 'view-' + firstView;
 
   // N7 四种状态都要能出现：加载中 / 空 / 错误 / 正常
   await page.goto(BASE + '/?demo=loading', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(900);
-  const stLoading = (await page.locator('#card-list .state-loading .spinner').count()) === 1;
+  const stLoading = (await page.locator('#board-list .state-loading .spinner').count()) === 1;
   await page.goto(BASE + '/?demo=empty', { waitUntil: 'networkidle' });
   await page.waitForTimeout(600);
-  const stEmpty = (await page.locator('#card-list .state-empty').count()) === 1;
+  const stEmpty = (await page.locator('#board-list .state-empty').count()) === 1;
   await page.goto(BASE + '/?demo=error', { waitUntil: 'networkidle' });
   await page.waitForTimeout(600);
-  const stError = (await page.locator('#card-list .state-error').count()) === 1;
-  const stRetry = (await page.locator('#card-list .state-error .empty-jump').count()) === 1;
+  const stError = (await page.locator('#board-list .state-error').count()) === 1;
+  const stRetry = (await page.locator('#board-list .state-error .empty-jump').count()) === 1;
   await page.goto(BASE, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.card');
-  const stNormal = (await page.locator('#card-list .empty-state').count()) === 0;
+  await page.waitForSelector('#board-list .card');
+  const stNormal = (await page.locator('#board-list .empty-state').count()) === 0;
   R['N7_四种状态都能出现'] = stLoading && stEmpty && stError && stNormal;
   R['N8_错误态给出重试出口'] = stRetry;
   O['N7_四态明细'] = JSON.stringify({ loading: stLoading, empty: stEmpty, error: stError, normal: stNormal });
@@ -278,8 +323,8 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });
   await page.goto(BASE, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.card');
-  await page.locator('.card').first().click();                   // ① 卡片进详情
+  await page.waitForSelector('#board-list .card');
+  await page.locator('#board-list .card').first().click();       // ① 卡片进详情
   await page.waitForTimeout(500);
   R['R_卡片可进详情'] = page.url().includes('detail.html?id=');
 
@@ -293,6 +338,14 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   await page.locator('#copy-btn').click();                       // ③ 复制结论
   await page.waitForTimeout(300);
   R['R_复制按钮可反馈'] = (await page.locator('#copy-btn').textContent()).includes('已复制');
+
+  // Day 15 新增：浏览足迹确实写进了 localStorage（个人主页的数据来源）
+  R['R_浏览足迹已记录'] = await page.evaluate(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('fx_history'));
+      return Array.isArray(v) && v.some((x) => x && x.id === 'demo-005');
+    } catch (e) { return false; }
+  });
 
   // 详情页按钮触控尺寸
   const detailSmall = await page.evaluate(() =>

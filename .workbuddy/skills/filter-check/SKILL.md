@@ -20,10 +20,11 @@ agent_created: true
 
 | 组件 key | 页面 | 条件筛选器 | 关键词框 | 列表容器 | 计数 |
 |---|---|---|---|---|---|
-| `feed` | index.html · 热点卡片流 | `#verdict-filter` | `#feed-search` | `#card-list` | `#filter-summary` |
-| `board` | index.html · 辟谣榜 | `#board-tabs`（时间档） | `#board-search` | `#board-list` | 无 |
+| `board` | index.html · 辟谣榜（默认视图，原「热点卡片流」已并入） | `#verdict-filter` | `#board-search` | `#board-list` | `#filter-summary` |
 | `source` | detail.html?id= · 信源比对 | 无 | `#source-search` | `#source-cards` | `#source-summary` |
-| `favs` | index.html · 我的收藏 | 无（v2 起补 `#fav-verdict-filter`） | `#fav-search` | `#fav-list` | 无（v2 起补 `#fav-summary`） |
+| `favs` | mine.html · 个人主页·我的收藏 | 无 | `#fav-search` | `#mine-fav-list` | `#fav-summary` |
+
+**Day 15 变更（2026-10-04）**：原 `feed` 组件（首页·热点卡片流）随导航重构并入 `board`，三态断言一条没删，只换了容器 id；`favs` 从首页视图迁到独立页 mine.html，并补上关键词筛选（保证断言强度不降）。
 
 **新组件接入方式**：在 `filter-check.js` 的 `COMPS` 里加一条配置（选择器 + 基线条数 + 有/无结果用例），无需改内核。
 

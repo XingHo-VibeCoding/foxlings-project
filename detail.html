@@ -8,22 +8,26 @@
 </head>
 <body>
   <header class="site-header">
-    <div class="container">
-      <a class="back-link" href="index.html">← 返回首页</a>
-      <h1 class="site-title">🔍 热门时事真伪辨别</h1>
+    <div class="container brand-row">
+      <h1 class="brand">
+        <a class="brand-link" href="index.html#/board">
+          <span class="brand-logo" aria-hidden="true">真</span>
+          <span class="brand-name">热门时事真伪辨别</span>
+        </a>
+      </h1>
+      <a class="avatar-btn" href="mine.html" aria-label="进入个人主页" title="个人主页">创</a>
     </div>
   </header>
 
   <main class="container">
-    <!-- Day 13 余力加练：面包屑 —— 随时告诉用户「我现在在哪一层」 -->
+    <!-- 面包屑：随时告诉用户「我现在在哪一层」；第一项同时承担返回首页的职责 -->
     <nav class="breadcrumb" aria-label="面包屑">
-      <a href="index.html">首页</a>
+      <a class="back-link" href="index.html">← 返回首页</a>
       <span class="crumb-sep" aria-hidden="true">›</span>
       <span aria-current="page">核查详情</span>
     </nav>
 
-    <!-- 核查档案头部：标题 + 结论标签 + 更新日期（第 4 步由 detail.js 填充）
-         Day 13：内容改由 detail.js 按「加载中 / 正常 / 空 / 错误」四种状态渲染 -->
+    <!-- 核查档案头部：标题 + 结论标签 + 更新日期（由 detail.js 按「加载中 / 正常 / 空 / 错误」四种状态渲染） -->
     <section id="detail-head" class="detail-head"></section>
 
     <!-- 溯源时间线（F1） -->
@@ -35,7 +39,7 @@
     <!-- 信源比对（F2） -->
     <section id="section-sources" class="detail-section" hidden>
       <h2>信源比对</h2>
-      <!-- Day 12 延伸：信源关键词筛选（按信源名 + 域名匹配，清空恢复全部） -->
+      <!-- 信源关键词筛选（按信源名 + 域名匹配，清空恢复全部） -->
       <input type="search" id="source-search" class="filter-search"
              placeholder="输入关键词筛选信源…" aria-label="按关键词筛选信源">
       <p class="filter-summary" id="source-summary" aria-live="polite">共 0 条信源</p>
@@ -47,6 +51,10 @@
   <footer class="site-footer">
     <div class="container">
       <p>本站是帮助用户自查的辅助工具，不是下结论的判官 · 数据人工整理 · 每条信源可点开验证</p>
+      <div class="footer-links">
+        <a href="mine.html">个人主页</a>
+        <a href="mine.html#about">判断方法</a>
+      </div>
     </div>
   </footer>
 

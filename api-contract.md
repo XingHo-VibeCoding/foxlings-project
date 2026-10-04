@@ -1,0 +1,62 @@
+# api-contract.md — 接口契约（Day 15 定稿）
+
+> 目的：**表结构先定下来，后面每个接口都在同一套字段上工作，不会每屏各造一套。**
+> 现状：纯静态（0 个后端 API）。本文同时定义「未来的接口长什么样」——接后端时按此实现，字段不再重造。
+
+---
+
+## 一、数据模型（唯一权威定义）
+
+### items（核查条目，存于 `data/data.json` 的 `items` 数组）
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `id` | string | 是 | 唯一编号，如 `demo-001` / `20261004-01` |
+| `title` | string | 是 | ≤30 字热点词条标题 |
+| `verdict` | string | 是 | 四选一：`真` / `假` / `存疑` / `部分属实` |
+| `summary` | string | 是 | ≤150 字大白话依据 |
+| `sources` | array | 是 | ≥2 条；每条 `{ name, url, date }`（date=查证日期 YYYY-MM-DD） |
+| `origin` | string | 是 | 最早出处；允许「未能溯源」+已知最早流传信息 |
+| `first_seen` | string | 是 | YYYY-MM-DD |
+| `updated_at` | string | 是 | YYYY-MM-DD |
+| `heat` | number | 否 | **0-100 整数，辟谣榜排序依据；缺失时前端回退按 updated_at 倒序**（Day 15 新增） |
+| `heat_note` | string | 否 | 热度说明（展示为角标，如「微博热搜前 10」） |
+| `cross_check` | string | 否 | 三选一：相互印证 / 存在矛盾 / 信源不足（非法值按「信源不足」降级） |
+
+校验规则在 `js/data.js`：缺必填字段或 verdict 非法的条目**跳过并在控制台警告**，页面照常渲染其余条目。
+
+### 本地存储（浏览器 localStorage，不上传任何数据）
+
+| 键 | 结构 | 写入方 | 读取方 |
+|---|---|---|---|
+| `fx_favs` | string[]（条目 id） | detail.js（收藏按钮） | mine.js（收藏列表） |
+| `fx_history` | `{id, at}[]` 最多 20 条 | detail.js（进详情页记录） | mine.js（浏览足迹） |
+| `fx_myreports` | `{text, at}[]` 最多 50 条 | mine.js（线索本地暂存） | mine.js |
+
+---
+
+## 二、当前接口（0 个后端）
+
+| 调用 | 方向 | 说明 |
+|---|---|---|
+| `GET data/data.json` | 浏览器 → 静态托管 | 一次性拉全量（当前 <100KB），前端过滤渲染 |
+
+---
+
+## 三、预留接口（接后端时按此实现，不提前写）
+
+接后端的第一步是健康检查（课程 Day 15 的 `/api/health`），随后按模块逐个点亮：
+
+| 接口 | 方法 | 用途 | 状态 |
+|---|---|---|---|
+| `/api/health` | GET | 部署链路打通验证 | 待接后端 |
+| `/api/items` | GET | 条目列表（支持 range / verdict / q / 分页）——替代 data.json | 待接后端 |
+| `/api/items/:id` | GET | 单条详情 | 待接后端 |
+| `/api/search` | POST | 查询检索：站内命中 + 联网搜索 + AI 整合摘要（L3） | 待接后端 |
+| `/api/posts` | GET / POST | 论坛帖子（F3，含审核流） | 待接后端 |
+
+**约定**：
+
+1. 所有接口出错时返回 `{ "error": { "code": "...", "message": "..." } }`，前端一律按四态规范处理（loading / empty / error / normal），错误态必须给重试出口；
+2. **数据迁移纪律**（沿用 TECH_DESIGN 第九节）：data.json 与数据库只许一处为准，禁止双写过渡期超过一天；
+3. 接口层字段命名与第一节**完全一致**，不做改名/映射——保证「先定表结构，接口都长在同一套字段上」。

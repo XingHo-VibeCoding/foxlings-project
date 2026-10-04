@@ -3,80 +3,111 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>热门时事真伪辨别 · 首页</title>
+  <title>热门时事真伪辨别</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="site-header">
-    <div class="container">
-      <h1 class="site-title">🔍 热门时事真伪辨别</h1>
-      <p class="site-slogan">证据整理员，不是审判官 —— 每个结论都有信源可查</p>
+    <div class="container brand-row">
+      <h1 class="brand">
+        <a class="brand-link" href="index.html#/board">
+          <span class="brand-logo" aria-hidden="true">真</span>
+          <span class="brand-name">热门时事真伪辨别</span>
+        </a>
+      </h1>
+      <!-- Day 15：主导航收敛为三个 tab；个人主页不占 tab，走右上角头像入口 -->
+      <nav class="nav-tabs" id="view-tabs" role="tablist" aria-label="主视图切换">
+        <button class="nav-tab" role="tab" id="tab-board" data-view="board"
+                aria-selected="true" aria-controls="view-board" tabindex="0">辟谣榜</button>
+        <button class="nav-tab" role="tab" id="tab-search" data-view="search"
+                aria-selected="false" aria-controls="view-search" tabindex="-1">查询检索</button>
+        <button class="nav-tab" role="tab" id="tab-forum" data-view="forum"
+                aria-selected="false" aria-controls="view-forum" tabindex="-1">论坛</button>
+      </nav>
+      <a class="avatar-btn" href="mine.html" aria-label="进入个人主页" title="个人主页">创</a>
     </div>
   </header>
 
   <main class="container">
-    <!-- 视图切换：卡片流（默认） / 辟谣榜 / 我的收藏
-         Day 13：改用「手写 hash 路由」驱动（#/feed、#/board、#/favs），
-         刷新、分享链接、浏览器前进后退都能回到同一个视图；并补上标签的无障碍语义 -->
-    <div class="view-tabs" id="view-tabs" role="tablist" aria-label="视图切换">
-      <button class="tab active" role="tab" id="tab-feed" data-view="feed"
-              aria-selected="true" aria-controls="view-feed" tabindex="0">热点卡片流</button>
-      <button class="tab" role="tab" id="tab-board" data-view="board"
-              aria-selected="false" aria-controls="view-board" tabindex="-1">辟谣榜</button>
-      <button class="tab" role="tab" id="tab-favs" data-view="favs"
-              aria-selected="false" aria-controls="view-favs" tabindex="-1">我的收藏</button>
-    </div>
-
-    <!-- 视图一：热点卡片流 -->
-    <section id="view-feed" class="view active" role="tabpanel" aria-labelledby="tab-feed" tabindex="0" aria-label="热点卡片流">
-      <!-- Day 12：结论筛选器（全部/真/假/部分属实/存疑），纯前端本地筛选 -->
-      <div class="filter-bar" id="verdict-filter" role="group" aria-label="按核查结论筛选">
-        <button type="button" class="chip active" data-verdict="all" aria-pressed="true">全部</button>
-        <button type="button" class="chip" data-verdict="真" aria-pressed="false">真</button>
-        <button type="button" class="chip" data-verdict="假" aria-pressed="false">假</button>
-        <button type="button" class="chip" data-verdict="部分属实" aria-pressed="false">部分属实</button>
-        <button type="button" class="chip" data-verdict="存疑" aria-pressed="false">存疑</button>
+    <!-- 视图一：辟谣榜（默认视图）
+         原「热点卡片流」已并入本视图 —— 两者都是「列表 + 筛选 + 进详情」，
+         差别只是一组筛选条件，保留两个列表页属重复（v2 决策记录，2026-10-04）。 -->
+    <section id="view-board" class="view active" role="tabpanel" aria-labelledby="tab-board" tabindex="0" aria-label="辟谣榜">
+      <div class="view-head">
+        <div>
+          <h2 class="view-title">辟谣榜</h2>
+          <p class="view-sub">热点按热度排序，越靠前越值得先看一眼</p>
+        </div>
+        <!-- 装饰 D6：数据徽卡（数字由 home.js 按真实数据算出） -->
+        <div class="stat-row" id="board-stats"></div>
       </div>
-      <!-- Day 12 延伸：关键词筛选，与结论筛选叠加生效（输入即过滤，清空即恢复全量） -->
-      <input type="search" id="feed-search" class="filter-search"
-             placeholder="输入关键词筛选标题或摘要…" aria-label="按关键词筛选热点卡片">
-      <p class="filter-summary" id="filter-summary" aria-live="polite">共 0 条</p>
-      <div id="card-list" class="card-list"></div>
-    </section>
 
-    <!-- 视图二：辟谣榜（日/周/月/年 + 检索，第 3 步实现） -->
-    <section id="view-board" class="view" role="tabpanel" aria-labelledby="tab-board" tabindex="0" aria-label="辟谣榜">
       <div class="board-toolbar">
-        <div class="board-tabs" id="board-tabs">
-          <button class="tab active" data-range="day">日榜</button>
-          <button class="tab" data-range="week">周榜</button>
+        <div class="board-tabs" id="board-tabs" role="group" aria-label="时间范围">
+          <button class="tab" data-range="day">日榜</button>
+          <button class="tab active" data-range="week">周榜</button>
           <button class="tab" data-range="month">月榜</button>
           <button class="tab" data-range="year">年榜</button>
         </div>
-        <input type="search" id="board-search" class="board-search" placeholder="输入关键词检索…">
+        <input type="search" id="board-search" class="board-search"
+               placeholder="搜标题或摘要…" aria-label="按关键词检索辟谣榜">
       </div>
-      <div id="board-list" class="card-list"></div>
-    </section>
 
-    <!-- 视图三：我的收藏（读详情页的收藏记录；结论筛选 + 关键词筛选叠加生效） -->
-    <section id="view-favs" class="view" role="tabpanel" aria-labelledby="tab-favs" tabindex="0" aria-label="我的收藏">
-      <div class="filter-bar" id="fav-verdict-filter" role="group" aria-label="按核查结论筛选收藏">
+      <div class="filter-bar" id="verdict-filter" role="group" aria-label="按核查结论筛选">
         <button type="button" class="chip active" data-verdict="all" aria-pressed="true">全部</button>
-        <button type="button" class="chip" data-verdict="真" aria-pressed="false">真</button>
         <button type="button" class="chip" data-verdict="假" aria-pressed="false">假</button>
         <button type="button" class="chip" data-verdict="部分属实" aria-pressed="false">部分属实</button>
         <button type="button" class="chip" data-verdict="存疑" aria-pressed="false">存疑</button>
+        <button type="button" class="chip" data-verdict="真" aria-pressed="false">真</button>
       </div>
-      <input type="search" id="fav-search" class="filter-search"
-             placeholder="输入关键词筛选收藏…" aria-label="按关键词筛选收藏">
-      <p class="filter-summary" id="fav-summary" aria-live="polite">共 0 条</p>
-      <div id="fav-list" class="card-list"></div>
+
+      <p class="filter-summary" id="filter-summary" aria-live="polite">共 0 条</p>
+      <div id="board-list" class="card-list"></div>
+    </section>
+
+    <!-- 视图二：查询检索（主打功能 · 骨架先行，后端接通后点亮自动联网 + AI 整合） -->
+    <section id="view-search" class="view" role="tabpanel" aria-labelledby="tab-search" tabindex="0" aria-label="查询检索">
+      <div class="view-head">
+        <div>
+          <h2 class="view-title">查询检索</h2>
+          <p class="view-sub">看到一条消息拿不准？先在这里查一查</p>
+        </div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-icon" aria-hidden="true">?</div>
+        <h3 class="placeholder-lead">这个功能正在建设中</h3>
+        <p>规划中的检索器分三步帮你查证：先在站内已核查库里搜；没命中就一键把关键词同时投向多个平台，看权威媒体怎么说；再附一份「自己怎么验一条消息」的步骤清单。</p>
+        <p>其中的<b>自动联网检索 + AI 整合摘要</b>需要后端支持，排在后面的施工板块里。</p>
+        <span class="soon">开发中</span>
+      </div>
+    </section>
+
+    <!-- 视图三：论坛（骨架先行） -->
+    <section id="view-forum" class="view" role="tabpanel" aria-labelledby="tab-forum" tabindex="0" aria-label="论坛">
+      <div class="view-head">
+        <div>
+          <h2 class="view-title">论坛</h2>
+          <p class="view-sub">你查不到的消息，交给大家一起溯源</p>
+        </div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-icon" aria-hidden="true">论</div>
+        <h3 class="placeholder-lead">这个功能正在建设中</h3>
+        <p>论坛用于互助溯源：把你在群聊、短视频里看到但查不到出处的消息发上来，大家一起找线索。私密内容和已删视频正是本站工具查不到、最需要人工补位的地方。</p>
+        <p>发帖、回复与内容审核需要账号与后端支持，排在后面的施工板块里。</p>
+        <span class="soon">开发中</span>
+      </div>
     </section>
   </main>
 
   <footer class="site-footer">
     <div class="container">
       <p>本站是帮助用户自查的辅助工具，不是下结论的判官 · 数据人工整理 · 每条信源可点开验证</p>
+      <div class="footer-links">
+        <a href="mine.html">个人主页</a>
+        <a href="mine.html#about">判断方法</a>
+        <a href="index.html#/search">查询检索</a>
+      </div>
     </div>
   </footer>
 

@@ -333,6 +333,31 @@ async function initDetail() {
   renderTimeline(item);
   renderSources(item);
   initSourceFilter();
+  recordHistory(item.id);   // 留一笔浏览足迹（个人主页读取）
+}
+
+/* ============================================================
+   Day 15：浏览足迹（个人主页「浏览足迹」的数据来源）
+   只记 id + 时间，最多留 20 条；无痕模式写不进去也不影响页面。
+   ============================================================ */
+
+const HIST_KEY = "fx_history";
+const HIST_MAX = 20;
+
+function recordHistory(id) {
+  if (!id) return;
+  try {
+    let list = [];
+    try {
+      const v = JSON.parse(localStorage.getItem(HIST_KEY));
+      if (Array.isArray(v)) list = v;
+    } catch (e) { list = []; }
+    list = list.filter((x) => x && x.id !== id);   // 重复访问只保留最近一次
+    list.unshift({ id: id, at: Date.now() });
+    localStorage.setItem(HIST_KEY, JSON.stringify(list.slice(0, HIST_MAX)));
+  } catch (e) {
+    // 无痕模式 / 存储被禁用：忽略即可，浏览足迹不是核心功能
+  }
 }
 
 /** 余力加练：返回上一页——站内进来的走浏览器后退（保留来路的视图与筛选），直接打开的回首页 */
