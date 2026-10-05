@@ -65,20 +65,24 @@
       <div id="board-list" class="card-list"></div>
     </section>
 
-    <!-- 视图二：查询检索（主打功能）
-         本期已完成（纯静态可做）：L1 站内检索 + 多源检索入口 + L2「自己怎么验」四步清单；
-         L3 自动联网 + AI 整合摘要待接后端点亮（见 api-contract.md 第三节 /api/search）。 -->
+    <!-- 视图二：查询检索（主打功能）—— 页内两个模块
+         ① 站内搜索：查本站已核查库，命中直接给卡片；
+         ② 全网溯源：把关键词同时投向「官方来源」与「网络来源」两组渠道，人工多源比对。
+         两者共用一个检索框（输入一次，随时来回切换）。
+         本期纯静态能做的都做了：L1 站内检索 + L1 多源溯源入口 + L2「自己怎么验」四步清单；
+         L3 自动抓取网页 + AI 整合摘要待接后端点亮（见 api-contract.md 第三节 /api/search）。 -->
     <section id="view-search" class="view" role="tabpanel" aria-labelledby="tab-search" tabindex="0" aria-label="查询检索">
       <div class="view-head">
         <div>
           <h2 class="view-title">查询检索</h2>
-          <p class="view-sub">看到一条消息拿不准？把关键词丢进来，先查站内已核查的条目</p>
+          <p class="view-sub">先在站内查有没有核查记录，再上全网溯源，比对官方与网络两边的说法</p>
         </div>
       </div>
 
+      <!-- 共享检索框：两个模块用同一个关键词 -->
       <form class="search-form" id="search-form" role="search">
         <input type="search" id="search-input" class="search-input" autocomplete="off"
-               placeholder="输入关键词，如「养老金」「医保」" aria-label="输入要查证的消息关键词">
+               placeholder="输入关键词或整句消息，如「养老金」" aria-label="输入要查证的消息关键词">
         <button type="submit" class="search-go">查证</button>
       </form>
 
@@ -89,12 +93,34 @@
         <button type="button" class="chip" data-sample="台风">台风</button>
       </div>
 
-      <p class="search-summary" id="search-summary" aria-live="polite">正在加载站内核查库…</p>
-      <div id="search-results" class="search-results"></div>
+      <!-- 两个模块的切换器（页内二级切换，与主 tab 同款样式，不占主导航） -->
+      <div class="mode-bar" id="search-modes" role="group" aria-label="检索方式">
+        <button type="button" class="tab active" data-mode="inside" aria-pressed="true">站内搜索</button>
+        <button type="button" class="tab" data-mode="trace" aria-pressed="false">全网溯源</button>
+      </div>
 
-      <!-- L2 引导式查证清单：本站「证据整理员」定位最实在的抓手，纯静态即可用 -->
+      <p class="search-summary" id="search-summary" aria-live="polite">正在加载站内核查库…</p>
+
+      <!-- 模块一：站内搜索 -->
+      <div class="search-mode" id="mode-inside" role="region" aria-label="站内搜索">
+        <div id="search-results" class="search-results"></div>
+      </div>
+
+      <!-- 模块二：全网溯源（官方来源 / 网络来源 两组） -->
+      <div class="search-mode" id="mode-trace" role="region" aria-label="全网溯源" hidden>
+        <div class="trace-head">
+          <h3 class="trace-title">同一句话，官方和网络各是怎么说的</h3>
+          <p class="trace-sub">本站不做裁判，只帮你把两边的说法摆到一起——权威渠道集体沉默，本身就是个信号。</p>
+        </div>
+        <div id="trace-results" class="trace-results"></div>
+        <p class="search-soon" id="trace-ai-soon">
+          <span class="soon">开发中</span>自动抓取网页 + AI 整合摘要需要后端支持，接通后这两组里会直接列出结果；现在请点开入口自己比对。
+        </p>
+      </div>
+
+      <!-- L2 引导式查证清单：两个模块共用，本站「证据整理员」定位最实在的抓手，纯静态即可用 -->
       <section class="guide-block" aria-labelledby="guide-title">
-        <h3 class="guide-title" id="guide-title">站内没查到？自己这样验一遍</h3>
+        <h3 class="guide-title" id="guide-title">查完还是拿不准？自己这样验一遍</h3>
         <ol class="guide-steps">
           <li><div class="gs-body"><b>找最早出处</b><span class="gs-desc">最早是谁发的？原文现在还打得开吗？截图有没有裁掉上下文的痕迹？</span></div></li>
           <li><div class="gs-body"><b>看权威有没有报</b><span class="gs-desc">新华社、央视、政府官网有没有说过这件事——权威渠道集体沉默，本身就是个信号。</span></div></li>
@@ -103,8 +129,6 @@
         </ol>
         <p class="guide-note">四步走完还是拿不准？<a href="index.html#/forum">发到论坛</a>，让大家一起帮你溯源。</p>
       </section>
-
-      <p class="search-soon"><span class="soon">AI 整合检索 · 开发中</span>自动联网搜索 + AI 整合摘要需要后端支持，接通后结果会显示在这里。</p>
     </section>
 
     <!-- 视图三：论坛（骨架先行） -->

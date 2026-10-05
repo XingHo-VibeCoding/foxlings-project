@@ -349,6 +349,45 @@ body {
   background: var(--c-doubt-soft); color: var(--c-doubt-deep);
 }
 
+/* ---------- 检索页的两个模块（站内搜索 / 全网溯源） ---------- */
+/* 页内二级切换：与主 tab 同款外观，但属于同一视图内部的切换，不占主导航 */
+.mode-bar { display: flex; gap: 6px; margin: 2px 0 12px; flex-wrap: wrap; }
+/* hidden 属性必须真的生效（下面两条规则都不能给 .search-mode 设 display，否则会把 hidden 顶掉） */
+.search-mode[hidden] { display: none; }
+
+.trace-head { margin-bottom: 14px; }
+.trace-title { font-size: 16px; margin-bottom: 6px; }
+.trace-sub { font-size: 13px; color: var(--c-muted); }
+
+/* 两组渠道：左侧色条区分「官方」与「网络」，不读标题也能一眼分清 */
+.trace-group {
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  border-left: 3px solid var(--c-line); padding: 16px; margin-bottom: 12px;
+}
+.trace-group-official { border-left-color: var(--c-primary); }
+.trace-group-web { border-left-color: var(--c-doubt); }
+.trace-group-head { margin-bottom: 12px; }
+.trace-group-title { font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trace-count { font-size: 12px; font-weight: normal; color: var(--c-muted); }
+.trace-group-note { font-size: 13px; color: var(--c-muted); margin-top: 4px; }
+
+.trace-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.trace-link {
+  display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  min-height: 44px; padding: 10px 14px; border: 1px solid var(--c-chip-border);
+  border-radius: 10px; background: var(--c-card); text-decoration: none;
+  transition: background .25s, border-color .25s;
+}
+.trace-link:hover { background: var(--c-hover-bg); border-color: var(--c-primary); }
+.tl-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tl-name { font-size: 13px; font-weight: bold; color: var(--c-text); }
+.tl-scope { font-size: 12px; color: var(--c-primary); flex-shrink: 0; }
+.tl-note { font-size: 12px; color: var(--c-muted); }
+
+.trace-tip { font-size: 13px; color: var(--c-muted); margin: 4px 0 14px; }
+.trace-tip b { color: var(--c-text); }
+.trace-tip a { color: var(--c-primary); }
+
 /* ---------- 占位视图（论坛，本期未开工） ---------- */
 .placeholder {
   background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);

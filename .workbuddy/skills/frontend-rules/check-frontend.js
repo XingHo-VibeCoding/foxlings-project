@@ -17,7 +17,16 @@
 
    Day 17 变更记录（检索页骨架）：
      新增 S 组三条断言，卡住检索页的两件核心交付物（站外兜底入口、L2 查证四步）
-     以及「未做的能力必须标注开发中」这条诚实性底线。 */
+     以及「未做的能力必须标注开发中」这条诚实性底线。
+
+   Day 18 变更记录（检索页拆成两个模块）：
+     检索页由「一个检索框 + 站外兜底链接」拆成两个模块：站内搜索 / 全网溯源
+     （溯源结果再分「官方来源」「网络来源」两组）。S 组随之扩写到 8 条：
+     原来那条「站外兜底 ≥3 个跳转按钮」改为「无命中给溯源出口」——
+     因为兜底入口现在有了更好的归宿（切模块继续查），比丢四个站外链接更顺；
+     新增：官方组/网络组成组且新标签打开、入口带关键词直达、两模块互斥且高亮唯一、
+     溯源模块随关键词刷新且清空回引导、溯源模块可深链（#/search/trace）。
+     断言强度只增不减：S 组 3 → 9 条，硬门槛总数 68 → 74。 */
 const fs = require('fs');
 const PW = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
@@ -337,18 +346,64 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   R['N8_错误态给出重试出口'] = stRetry;
   O['N7_四态明细'] = JSON.stringify({ loading: stLoading, empty: stEmpty, error: stError, normal: stNormal });
 
-  /* ---- S 组：检索页骨架的两个核心交付物（Day 17 新增） ----
-     这两样是「查询检索」作为主打功能的立身之本，缺了页面就只剩一个空壳：
-       ① 站内没命中时必须给站外兜底入口（不能只回一句「没找到」让人走投无路）；
-       ② L2 查证四步清单常显（这才是「证据整理员」定位最实在的抓手）。
-     另断一条：还没做的 L3 能力必须有「开发中」标注，不许假装已有。 */
+  /* ---- S 组：检索页两个模块的核心交付物（Day 17 新增，Day 18 随模块化扩写） ----
+     检索页拆成「站内搜索」+「全网溯源」两个模块，两者的立身之本各断一条：
+       站内：没命中必须给出口（清空 + 指向全网溯源），不能只回一句「没找到」就让人走投无路；
+       溯源：必须真的分成「官方来源」和「网络来源」两组入口，且入口带关键词直达。
+     另断：L2 查证四步清单常显、L3 未做能力必须有「开发中」标注（不许假装已有）、
+     两模块互斥显示、溯源模块可深链（分享/刷新不丢模块）。 */
   await page.goto(BASE + '/#/search', { waitUntil: 'networkidle' });
   await page.waitForSelector('#search-input');
   await page.fill('#search-input', 'zzz绝不存在zzz');
   await page.waitForTimeout(400);
-  R['S1_检索无命中给站外兜底'] = (await page.locator('#search-results .jump-btn[target="_blank"]').count()) >= 3;
+
+  // ① 站内模块：无命中给两条路（清空关键词 / 去全网溯源）
+  R['S1_站内无命中给溯源出口'] = (await page.locator('#search-results .empty-jump').count()) >= 1 &&
+    (await page.locator('#search-results #search-to-trace').count()) === 1;
   R['S2_查证清单四步齐备'] = (await page.locator('.guide-steps li').count()) === 4;
   R['S3_未做的能力有标注'] = (await page.locator('#view-search .soon').count()) === 1;
+
+  // ② 溯源模块：从站内无命中处点过去，必须真的切成溯源、并给出两组入口
+  await page.locator('#search-results #search-to-trace').click();
+  await page.waitForTimeout(400);
+  const OFFICIAL = '#trace-results .trace-group-official .trace-link';
+  const WEBLINK = '#trace-results .trace-group-web .trace-link';
+  const nOfficial = await page.locator(OFFICIAL).count();
+  const nWeb = await page.locator(WEBLINK).count();
+  R['S4_溯源官方来源成组'] = nOfficial >= 3 &&
+    (await page.locator(OFFICIAL + '[target="_blank"]').count()) === nOfficial;
+  R['S5_溯源网络来源成组'] = nWeb >= 3 &&
+    (await page.locator(WEBLINK + '[target="_blank"]').count()) === nWeb;
+  // 入口必须带关键词直达（不能把人丢到首页让他自己再搜一次）
+  R['S6_溯源入口带关键词'] =
+    (await page.locator(OFFICIAL + '[href*="' + encodeURIComponent('zzz绝不存在zzz') + '"]').count()) >= 1;
+
+  // ③ 两模块互斥：同一时刻只显示一个，切换器唯一高亮且 aria-pressed 同步
+  R['S7_两模块互斥且高亮唯一'] = await (async () => {
+    const traceOn = await page.locator('#mode-trace').isVisible();
+    const insideOn = await page.locator('#mode-inside').isVisible();
+    const active = await page.locator('#search-modes .tab.active').count();
+    const pressed = await page.locator('#search-modes .tab[aria-pressed="true"]').count();
+    return traceOn && !insideOn && active === 1 && pressed === 1;
+  })();
+
+  // ④ 溯源模块随关键词刷新 + 清空回引导态（与站内模块同构的三态）
+  R['S9_溯源随关键词刷新'] = await (async () => {
+    await page.fill('#search-input', '养老金');
+    await page.waitForTimeout(400);
+    const has = (await page.locator('#trace-results .trace-link').count()) > 0;
+    await page.fill('#search-input', '');
+    await page.waitForTimeout(400);
+    const back = (await page.locator('#trace-results .trace-link').count()) === 0 &&
+      (await page.locator('#trace-results .empty-state').count()) === 1;
+    return has && back;
+  })();
+
+  // ⑤ 深链：直接打开 #/search/trace 也必须落在溯源模块（否则「把链接发给同伴」就失效）
+  await page.goto(BASE + '/#/search/trace', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+  R['S8_溯源模块可深链'] = (await page.locator('#mode-trace').isVisible()) &&
+    !(await page.locator('#mode-inside').isVisible());
 
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });

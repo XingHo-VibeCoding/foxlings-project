@@ -334,6 +334,18 @@ const VIEW_TITLES = { board: "辟谣榜", search: "查询检索", forum: "论坛
 const DEFAULT_VIEW = "board";
 const BASE_TITLE = "热门时事真伪辨别";
 
+/** 检索页的二级模块（页内切换，不占主导航）：地址形如 #/search/trace */
+const SEARCH_SUB_MODES = ["inside", "trace"];
+
+/** 当前视图：用来判断 hash 变化是不是真的「换视图」（页内模块切换不算，不该弹回页首） */
+let currentView = DEFAULT_VIEW;
+
+/** 合法地址：#/board、#/forum、#/search，以及检索页的二级模块 #/search/inside、#/search/trace */
+function isValidHash() {
+  return new RegExp("^#/(" + VIEWS.join("|") + ")$").test(location.hash) ||
+         new RegExp("^#/search/(" + SEARCH_SUB_MODES.join("|") + ")$").test(location.hash);
+}
+
 /** 从地址栏解析当前视图；解析不出来就落到默认视图 */
 function viewFromHash() {
   const m = String(location.hash || "").match(/^#\/?([a-zA-Z]+)/);
@@ -386,9 +398,12 @@ function initRouter() {
 
   // 地址栏变化（含浏览器前进 / 后退）→ 切视图并重新渲染
   window.addEventListener("hashchange", () => {
-    paintView(viewFromHash());
+    const view = viewFromHash();
+    const viewChanged = view !== currentView; // 页内模块切换（#/search/inside ↔ /trace）不算换视图
+    currentView = view;
+    paintView(view);
     renderAllViews();
-    window.scrollTo(0, 0);
+    if (viewChanged) window.scrollTo(0, 0);
   });
 }
 
@@ -397,10 +412,11 @@ function initRouter() {
    ============================================================ */
 
 initRouter();
-paintView(viewFromHash()); // 首屏按地址栏落位（直接打开 #/search 就停在这一档）
+currentView = viewFromHash();
+paintView(currentView); // 首屏按地址栏落位（直接打开 #/search/trace 就停在溯源模块）
 // 地址栏规范化：空 hash 或非法值补成默认视图（replaceState 不产生多余历史记录）
-if (!new RegExp("^#/(" + VIEWS.join("|") + ")$").test(location.hash)) {
-  history.replaceState(null, "", "#/" + viewFromHash());
+if (!isValidHash()) {
+  history.replaceState(null, "", "#/" + currentView);
 }
 initBoard();
 mountDemoBanner();
