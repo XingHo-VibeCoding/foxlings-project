@@ -3,6 +3,13 @@
 本项目是纯静态网站（无后端、无数据库）。因为页面用 `fetch` 读取本地 JSON 数据，
 **直接双击 HTML 文件会被浏览器的安全限制拦住**，必须通过一个本地静态服务器打开。
 
+## 在线访问（Day 16 起已上线）
+
+**公网地址：<https://rumor-check-12000.app.workbuddy.host/>** —— 手机 / 别的电脑直接打开即可，
+同伴交叉验证、外部真人试用都用这个链接，无需自己起服务器。
+
+数据与代码更新后需要重新发布才能反映到线上（本地改动不会自动同步）。
+
 ## 启动步骤
 
 1. 打开终端（cmd 或 PowerShell）；
@@ -27,7 +34,7 @@
 | `http://localhost:8000/` | 首页 · 辟谣榜（默认视图：全站条目按热度排序，时间档 + 结论 + 关键词三组筛选叠加） |
 | `http://localhost:8000/#/search` | 查询检索（主打功能，开发中占位） |
 | `http://localhost:8000/#/forum` | 论坛（开发中占位） |
-| `http://localhost:8000/detail.html?id=demo-005` | 详情页示例：溯源时间线 + 信源比对 + 复制/收藏 |
+| `http://localhost:8000/detail.html?id=20261005-01` | 详情页示例：溯源时间线 + 信源比对 + 复制/收藏 |
 | `http://localhost:8000/mine.html` | 个人主页：我的收藏 + 浏览足迹 + 我提交的线索 + 判断方法（全本机存储） |
 
 点榜单任意卡片即可进入对应详情页（地址带 `?id=条目id`）；右上角头像进个人主页。
@@ -86,7 +93,18 @@
 - **端口被占用**（`Address already in use`）：换个端口，如 `python -m http.server 8001`，访问地址跟着换；
 - **数据不显示**：检查 `data/data.json` 是否为合法 JSON（条目需通过 `js/data.js` 的字段校验，坏条目会被跳过并在控制台警告）。
 
-## 部署（后续）
+## 数据说明（Day 16 起）
 
-Day 7+ 计划部署到 GitHub Pages：仓库 Settings → Pages → 选择 main 分支根目录。
+`data/data.json` 现为 **23 条种子数据**（全部带【示例】标记，事件为构造样本，不当作真实事实传播）：
+结论四档齐全（真 4 / 假 8 / 存疑 7 / 部分属实 4），`updated_at` 覆盖今日（3 条）→ 本周（12 条）→
+本月（16 条）→ 今年（23 条）四档。表结构定稿见 `db/schema.sql`（items / posts / reports 三张表，
+尚未执行——接后端那天与 `db/json-to-sql.js` 一起跑，把这份种子数据灌进库）。
+
+## 部署
+
+- **已上线（Day 16）**：<https://rumor-check-12000.app.workbuddy.host/>（WorkBuddy 发布，静态托管）。
+  内容更新后需重新发布。
+- GitHub Pages（可选备用）：仓库 Settings → Pages → 选择 main 分支根目录，得到
+  `https://xingho-vibecoding.github.io/foxlings-project/`，与上面链接二选一即可。
+
 本文件由 Day 7~8 开发过程创建，运行方式变更时同步更新。

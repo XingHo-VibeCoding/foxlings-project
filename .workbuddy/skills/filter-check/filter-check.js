@@ -9,13 +9,49 @@
    Day 15 变更记录（导航结构重构）：
      · 原 `feed`（首页·热点卡片流）组件并入 `board` —— 两个列表页合并成一个辟谣榜，
        三态断言一条不删，只是换了容器 id（#card-list → #board-list）；
-     · `favs`（我的收藏）从「首页视图」搬到独立页 mine.html，选择器同步更新。 */
+     · `favs`（我的收藏）从「首页视图」搬到独立页 mine.html，选择器同步更新。
+
+   Day 16 变更记录（数据源扩充）：
+     · 种子数据由 5 条换成 23 条 —— **条数一律从 data/data.json 现算**（基线条数、
+       某个结论的条数、某个关键词的条数），不再写死 5 / 4 / 1 这些魔术数字；
+     · 挑哪一条来验（详情页信源、收藏对象）也从上往下现取，不再写死 demo-005。
+     · 教训：写死数据值的检查脚本，数据一换就全线超时——看着像页面坏了，
+       其实是脚本自己过期了。断言强度没降，只是不再假设数据长什么样。 */
+const fs = require('fs');
 const pw = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
 const BASE = 'http://localhost:8000';
 const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const NO_MATCH = 'zzz绝不存在zzz';
 const EMPTY_TEXT = '没有找到相关内容'; // 全站统一的无结果文案
+
+/* ---------------- 从数据源现算基线，不写死数字 ---------------- */
+
+const ROOT = 'D:/AI/foxlings-project';
+const ITEMS = (JSON.parse(fs.readFileSync(ROOT + '/data/data.json', 'utf8')).items) || [];
+if (!ITEMS.length) { console.error('脚本失败: data/data.json 里没有可用条目'); process.exit(1); }
+
+/** 年榜（365 天内）= 全量视图下的基线，与「今天」无关，不会随时间流逝而失效 */
+const inYear = (it) => {
+  const d = new Date(String(it.updated_at) + 'T00:00:00');
+  if (isNaN(d.getTime())) return false;
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const diff = (t - d) / 86400000;
+  return diff >= 0 && diff < 365;
+};
+const YEAR_ITEMS = ITEMS.filter(inYear);
+const countVerdict = (v) => YEAR_ITEMS.filter((i) => i.verdict === v).length;
+const countKeyword = (kw) => YEAR_ITEMS.filter((i) => (i.title + i.summary).indexOf(kw) !== -1).length;
+
+const SAMPLE = ITEMS[0];                       // 挑第一条来验详情页
+const SAMPLE_ID = SAMPLE.id;
+const SRC_KW = (SAMPLE.sources[0] || {}).name; // 该条第一个信源名，用来验信源筛选
+
+const FAV_IDS = ITEMS.slice(0, 2).map((i) => i.id);
+/** 关键词写死、条数现算：数据换了若这个词不再命中，断言会 FAIL 提醒改词，
+    而不是让脚本悄悄跳过。 */
+const FAV_KW = '养老金';
+const FAV_KW_COUNT = ITEMS.slice(0, 2).filter((i) => (i.title + i.summary).indexOf(FAV_KW) !== -1).length;
 
 /* ---------------- 组件登记表：新组件接进来只需加一条 ---------------- */
 const COMPS = {
@@ -30,36 +66,35 @@ const COMPS = {
     },
     chips: '#verdict-filter .chip',
     chipKey: 'data-verdict',
-    hitChip: { value: '存疑', count: 4 },
-    missChip: { value: '真', count: 0 },
-    hitKeyword: { value: '地铁', count: 1 },
+    hitChip: { value: '存疑', count: countVerdict('存疑') },
+    hitKeyword: { value: '地铁', count: countKeyword('地铁') },
     list: '#board-list',
     itemSel: '.card',
     search: '#board-search',
     summary: '#filter-summary',
-    baseline: 5
+    baseline: YEAR_ITEMS.length
   },
   source: {
     label: '详情页·信源比对',
     prepare: async (page) => {
-      await page.goto(BASE + '/detail.html?id=demo-005', { waitUntil: 'networkidle' });
+      await page.goto(BASE + '/detail.html?id=' + SAMPLE_ID, { waitUntil: 'networkidle' });
       await page.waitForSelector('#source-cards .src-card');
     },
     chips: null,
-    hitKeyword: { value: '石化', count: 1 },
+    hitKeyword: { value: SRC_KW, count: SAMPLE.sources.filter((s) => (s.name + s.url).indexOf(SRC_KW) !== -1).length },
     list: '#source-cards',
     itemSel: '.src-card',
     search: '#source-search',
     summary: '#source-summary',
-    baseline: 2
+    baseline: SAMPLE.sources.length
   },
   favs: {
     label: '个人主页·我的收藏',
     prepare: async (page) => {
-      // 造数据：清空后收藏两条（demo-001 存疑 / demo-005 假）
+      // 造数据：清空后收藏前两条（存疑 / 假各一条，结论标签不同便于肉眼核对）
       await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
       await page.evaluate(() => localStorage.removeItem('fx_favs'));
-      for (const id of ['demo-001', 'demo-005']) {
+      for (const id of FAV_IDS) {
         await page.goto(BASE + '/detail.html?id=' + id, { waitUntil: 'networkidle' });
         await page.waitForSelector('#fav-btn');
         await page.locator('#fav-btn').click();
@@ -69,12 +104,12 @@ const COMPS = {
       await page.waitForSelector('#mine-fav-list .mine-item');
     },
     chips: null,
-    hitKeyword: { value: '加油站', count: 1 },
+    hitKeyword: { value: FAV_KW, count: FAV_KW_COUNT },
     list: '#mine-fav-list',
     itemSel: '.mine-item',
     search: '#fav-search',
     summary: '#fav-summary',
-    baseline: 2,
+    baseline: FAV_IDS.length,
     zeroDataCheck: true // 组件可能有「一条数据都没有」的状态，必须与「筛空」文案不同
   }
 };
@@ -214,7 +249,7 @@ async function checkComp(page, key, cfg, R) {
   R['D1_辟谣榜默认视图渲染'] = (await page.locator('#board-list .card').count()) >= 1;
   await page.locator('#board-tabs .tab', { hasText: '年榜' }).click();
   await page.waitForTimeout(400);
-  R['D1_年榜全量渲染'] = (await page.locator('#board-list .card').count()) === 5;
+  R['D1_年榜全量渲染'] = (await page.locator('#board-list .card').count()) === YEAR_ITEMS.length;
   R['D2_无JS错误'] = errors.length === 0;
 
   await browser.close();

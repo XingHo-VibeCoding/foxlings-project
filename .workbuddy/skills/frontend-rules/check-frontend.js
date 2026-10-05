@@ -8,13 +8,26 @@
      导航从「首页内三个同页视图」改为「三个主 tab + 个人主页独立页」，
      因此 N 组与 L4 的断言由「写死 #view-feed / #tab-feed」改为「读 data-view 动态推导」，
      **断言强度不变**：首屏落位并规范化 hash、切视图地址栏同步、刷新保持、后退可用、
-     非法 hash 回落默认视图、四种状态齐备——一条都没少，只是不再假设视图叫什么名字。 */
+     非法 hash 回落默认视图、四种状态齐备——一条都没少，只是不再假设视图叫什么名字。
+
+   Day 16 变更记录（数据源扩充）：
+     种子数据由 5 条 demo-* 换成 23 条 —— 凡「挑一条真实数据来验」的地方
+     （详情页复制、浏览足迹、溢出巡检）一律改为从 data/data.json 现取，不再写死 id。
+     写死 id 的代价这次亲身踩到：数据一换，断言全卡在超时，看着像页面崩了。 */
 const fs = require('fs');
 const PW = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
 const ROOT = 'D:/AI/foxlings-project';
 const BASE = 'http://localhost:8000';
 const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+
+/* 示例条目 id **不写死**，从 data.json 动态取。
+   Day 16 教训：种子数据从 demo-005 换成 20261005-01 后，写死 id 的断言全部
+   停在「等 #copy-btn 出现」而超时，看起来像页面坏了，其实是脚本自己过期了。
+   凡是「挑一条真实数据来验」的地方，都从数据源现取。 */
+const SEED_ITEMS = (JSON.parse(fs.readFileSync(ROOT + '/data/data.json', 'utf8')).items) || [];
+const SAMPLE_ID = (SEED_ITEMS[0] || {}).id || '';
+if (!SAMPLE_ID) { console.error('脚本失败: data/data.json 里没有可用条目'); process.exit(1); }
 
 const R = {}; // 硬门槛
 const O = {}; // 观察项
@@ -245,7 +258,7 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
       await page.waitForTimeout(350);
       totalOverflow += await overflowNow();
     }
-    await page.goto(BASE + '/detail.html?id=demo-005', { waitUntil: 'networkidle' });
+    await page.goto(BASE + '/detail.html?id=' + SAMPLE_ID, { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
     totalOverflow += await overflowNow();
     await page.goto(BASE + '/mine.html', { waitUntil: 'networkidle' });
@@ -333,19 +346,19 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   await page.waitForTimeout(500);
   R['R_详情可回首页'] = !page.url().includes('detail.html');
 
-  await page.goto(BASE + '/detail.html?id=demo-005', { waitUntil: 'networkidle' });
+  await page.goto(BASE + '/detail.html?id=' + SAMPLE_ID, { waitUntil: 'networkidle' });
   await page.waitForSelector('#copy-btn');
   await page.locator('#copy-btn').click();                       // ③ 复制结论
   await page.waitForTimeout(300);
   R['R_复制按钮可反馈'] = (await page.locator('#copy-btn').textContent()).includes('已复制');
 
   // Day 15 新增：浏览足迹确实写进了 localStorage（个人主页的数据来源）
-  R['R_浏览足迹已记录'] = await page.evaluate(() => {
+  R['R_浏览足迹已记录'] = await page.evaluate((sid) => {
     try {
       const v = JSON.parse(localStorage.getItem('fx_history'));
-      return Array.isArray(v) && v.some((x) => x && x.id === 'demo-005');
+      return Array.isArray(v) && v.some((x) => x && x.id === sid);
     } catch (e) { return false; }
-  });
+  }, SAMPLE_ID);
 
   // 详情页按钮触控尺寸
   const detailSmall = await page.evaluate(() =>
