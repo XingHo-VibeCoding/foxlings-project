@@ -26,7 +26,14 @@
      因为兜底入口现在有了更好的归宿（切模块继续查），比丢四个站外链接更顺；
      新增：官方组/网络组成组且新标签打开、入口带关键词直达、两模块互斥且高亮唯一、
      溯源模块随关键词刷新且清空回引导、溯源模块可深链（#/search/trace）。
-     断言强度只增不减：S 组 3 → 9 条，硬门槛总数 68 → 74。 */
+     断言强度只增不减：S 组 3 → 9 条，硬门槛总数 68 → 74。
+
+   Day 19 变更记录（论坛骨架）：
+     论坛从占位块换成真骨架（列表 + 分类/关键词筛选 + 发帖暂存 + 社区规则）。
+     新增 F 组 9 条：占位已换真骨架、**未过审帖子不得进公开列表**（审核机制）、
+     分类筛选生效、无命中给清空出口且能恢复、发帖区标注开发中、审核规则已写明、
+     样例帖已标明、发帖暂存写进与个人主页同一个键、论坛按钮触控达标。
+     硬门槛总数 74 → 83。 */
 const fs = require('fs');
 const PW = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
@@ -41,6 +48,13 @@ const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const SEED_ITEMS = (JSON.parse(fs.readFileSync(ROOT + '/data/data.json', 'utf8')).items) || [];
 const SAMPLE_ID = (SEED_ITEMS[0] || {}).id || '';
 if (!SAMPLE_ID) { console.error('脚本失败: data/data.json 里没有可用条目'); process.exit(1); }
+
+/* 论坛帖子同理：条数与「待审样例」都从 data/posts.json 现取，不写死。
+   待审样例是 F2 的靶子——没有它 F2 会直接 FAIL，而不是静默通过。 */
+const SEED_POSTS = (JSON.parse(fs.readFileSync(ROOT + '/data/posts.json', 'utf8')).posts) || [];
+const APPROVED_POSTS = SEED_POSTS.filter((p) => p.status === 'approved');
+const PENDING_TITLES = SEED_POSTS.filter((p) => p.status !== 'approved').map((p) => String(p.title).slice(0, 10));
+if (!APPROVED_POSTS.length) { console.error('脚本失败: data/posts.json 里没有已通过的帖子'); process.exit(1); }
 
 const R = {}; // 硬门槛
 const O = {}; // 观察项
@@ -360,7 +374,7 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   // ① 站内模块：无命中给两条路（清空关键词 / 去全网溯源）
   R['S1_站内无命中给溯源出口'] = (await page.locator('#search-results .empty-jump').count()) >= 1 &&
     (await page.locator('#search-results #search-to-trace').count()) === 1;
-  R['S2_查证清单四步齐备'] = (await page.locator('.guide-steps li').count()) === 4;
+  R['S2_查证清单四步齐备'] = (await page.locator('#view-search .guide-steps li').count()) === 4;
   R['S3_未做的能力有标注'] = (await page.locator('#view-search .soon').count()) === 1;
 
   // ② 溯源模块：从站内无命中处点过去，必须真的切成溯源、并给出两组入口
@@ -404,6 +418,82 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   await page.waitForTimeout(500);
   R['S8_溯源模块可深链'] = (await page.locator('#mode-trace').isVisible()) &&
     !(await page.locator('#mode-inside').isVisible());
+
+  /* ---- F 组：论坛（F3 骨架 · Day 19 新增） ----
+     论坛的立身之本，逐条钉死：
+       ① 骨架必须真是能用的列表（占位块已撤，帖子真的渲染出来）；
+       ② **未过审的帖子不得进公开列表**——审核机制是法规前提，先在界面上立住；
+       ③ 无命中不是死胡同（清空出口 + 能恢复）；
+       ④ 用户内容必须写明社区规则与审核（合规底线，不能只有一句「开发中」）；
+       ⑤ 没做的能力如实标注，样例数据必须标明是样例（与检索页同一条诚实底线）。 */
+  await page.goto(BASE + '/#/forum', { waitUntil: 'networkidle' });
+  await page.waitForSelector('#forum-list .post-card');
+
+  R['F1_论坛已换真骨架'] = (await page.locator('#view-forum .placeholder').count()) === 0 &&
+    (await page.locator('#forum-list .post-card').count()) === APPROVED_POSTS.length;
+
+  // 待审样例的标题一个字都不许出现在公开列表里
+  R['F2_未过审帖子不进公开列表'] = await page.evaluate((titles) => {
+    const txt = (document.querySelector('#forum-list') || {}).textContent || '';
+    return titles.length > 0 && titles.every((t) => txt.indexOf(t) === -1);
+  }, PENDING_TITLES);
+
+  // 分类筛选：点「已解决」后列表里只剩这一类，且回「全部」能恢复
+  R['F3_分类筛选生效'] = await (async () => {
+    await page.locator('#forum-cats .chip[data-cat="已解决"]').click();
+    await page.waitForTimeout(350);
+    const cats = await page.locator('#forum-list .post-cat').allTextContents();
+    const only = cats.length > 0 && cats.every((t) => t.trim() === '已解决');
+    const uniq = (await page.locator('#forum-cats .chip.active').count()) === 1;
+    await page.locator('#forum-cats .chip[data-cat="all"]').click();
+    await page.waitForTimeout(350);
+    const back = (await page.locator('#forum-list .post-card').count()) === APPROVED_POSTS.length;
+    return only && uniq && back;
+  })();
+
+  // 无命中：零条目 + 统一文案 + 出口按钮，点出口能回到基线
+  R['F4_论坛无命中给清空出口'] = await (async () => {
+    await page.fill('#forum-search', 'zzz绝不存在zzz');
+    await page.waitForTimeout(400);
+    const zero = (await page.locator('#forum-list .post-card').count()) === 0;
+    const text = (await page.locator('#forum-list').textContent()).indexOf('没有找到相关内容') !== -1;
+    const hasExit = (await page.locator('#forum-list .empty-jump').count()) >= 1;
+    await page.locator('#forum-list .empty-jump').first().click();
+    await page.waitForTimeout(400);
+    const back = (await page.locator('#forum-list .post-card').count()) === APPROVED_POSTS.length &&
+      (await page.inputValue('#forum-search')) === '';
+    return zero && text && hasExit && back;
+  })();
+
+  // 诚实底线：发帖能力未接通，必须标注开发中；样例帖必须标明是样例
+  R['F5_发帖区标注开发中'] = (await page.locator('#view-forum .soon').count()) >= 1;
+  R['F6_样例帖已标明'] = (await page.locator('#view-forum .forum-sample-note').textContent())
+    .indexOf('样例') !== -1;
+
+  // 合规底线：社区规则里必须写明「审核」这件事
+  R['F7_审核规则已写明'] = await (async () => {
+    const txt = await page.locator('#view-forum .guide-block').textContent();
+    return txt.indexOf('审核') !== -1 && (await page.locator('#view-forum .guide-steps li').count()) === 4;
+  })();
+
+  // 发帖暂存必须写进与个人主页同一把键（fx_myreports），否则两处数据会分叉
+  R['F8_发帖暂存写同一键'] = await (async () => {
+    await page.evaluate(() => localStorage.removeItem('fx_myreports'));
+    await page.fill('#forum-input', '检查脚本：暂存链路测试（可删）');
+    await page.locator('#forum-submit').click();
+    await page.waitForTimeout(350);
+    return await page.evaluate(() => {
+      const v = JSON.parse(localStorage.getItem('fx_myreports') || '[]');
+      return Array.isArray(v) && v.length === 1 && !!v[0].text;
+    });
+  })();
+
+  // 论坛自己的按钮也要够大（B5 只扫得到当前可见视图里的按钮）
+  R['F9_论坛按钮均≥44px'] = (await page.evaluate(() =>
+    [...document.querySelectorAll('#view-forum button')]
+      .filter((b) => b.offsetParent !== null)
+      .map((b) => Math.round(b.getBoundingClientRect().height))
+      .filter((h) => h < 44))).length === 0;
 
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });

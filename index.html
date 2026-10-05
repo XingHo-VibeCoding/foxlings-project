@@ -131,21 +131,72 @@
       </section>
     </section>
 
-    <!-- 视图三：论坛（骨架先行） -->
+    <!-- 视图三：论坛（F3 骨架先行 · Day 19）
+         论坛的位置：把「工具查不到」的消息拿到人堆里一起溯源——
+         已删的短视频、私密群聊里的截图，正是自动化工具够不着、最需要人工补位的地方。
+         本期做到哪：界面骨架 + 样例帖子（data/posts.json，全部标注【示例】）+ 发帖暂存本机；
+         账号、发帖发布、回复与人工审核需要后端，接入后点亮（见 api-contract.md 的 /api/posts）。
+         社区规则与审核说明必须常显：用户内容必须有人管审核，是上线前的硬性前提。 -->
     <section id="view-forum" class="view" role="tabpanel" aria-labelledby="tab-forum" tabindex="0" aria-label="论坛">
       <div class="view-head">
         <div>
           <h2 class="view-title">论坛</h2>
           <p class="view-sub">你查不到的消息，交给大家一起溯源</p>
         </div>
+        <!-- 装饰 D6：数据徽卡（已通过 / 待审核，数字由 forum.js 按真实数据算出） -->
+        <div class="stat-row" id="forum-stats"></div>
       </div>
-      <div class="placeholder">
-        <div class="placeholder-icon" aria-hidden="true">论</div>
-        <h3 class="placeholder-lead">这个功能正在建设中</h3>
-        <p>论坛用于互助溯源：把你在群聊、短视频里看到但查不到出处的消息发上来，大家一起找线索。私密内容和已删视频正是本站工具查不到、最需要人工补位的地方。</p>
-        <p>发帖、回复与内容审核需要账号与后端支持，排在后面的施工板块里。</p>
-        <span class="soon">开发中</span>
+
+      <!-- 发帖区：后端接通前只能暂存本机（与个人主页「我提交的待核查」共用一份数据） -->
+      <section class="forum-compose" aria-labelledby="compose-title">
+        <h3 class="compose-title" id="compose-title">
+          发一条求助 <span class="soon">开发中</span>
+        </h3>
+        <label class="compose-label" for="forum-input">
+          你在哪看到这条消息的（群聊 / 短视频 / 朋友圈）？原文怎么说的？
+        </label>
+        <textarea id="forum-input" class="rep-input" rows="3"
+                  placeholder="例：家族群里说「下周起养老金改按新标准发放」，配了一张没有出处的截图……"
+                  aria-label="描述你要求助溯源的消息"></textarea>
+        <button type="button" class="empty-jump" id="forum-submit">暂存到本机</button>
+        <p class="compose-note" id="forum-submit-note" role="status">
+          发帖、回复与人工审核需要账号与后端支持。现在点按钮只存在你自己的浏览器里（<a href="mine.html">个人主页</a>最下方能看到），不会公开显示。
+        </p>
+      </section>
+
+      <!-- 筛选：分类 + 关键词（与全站列表同一套交互范式，两者叠加生效） -->
+      <div class="forum-toolbar">
+        <div class="filter-bar" id="forum-cats" role="group" aria-label="按帖子分类筛选">
+          <button type="button" class="chip active" data-cat="all" aria-pressed="true">全部</button>
+          <button type="button" class="chip" data-cat="求助溯源" aria-pressed="false">求助溯源</button>
+          <button type="button" class="chip" data-cat="已解决" aria-pressed="false">已解决</button>
+          <button type="button" class="chip" data-cat="经验讨论" aria-pressed="false">经验讨论</button>
+        </div>
+        <input type="search" id="forum-search" class="board-search"
+               placeholder="搜帖子标题或内容…" aria-label="按关键词检索论坛帖子">
       </div>
+
+      <p class="filter-summary" id="forum-summary" aria-live="polite">正在加载帖子…</p>
+      <div id="forum-list" class="post-list"></div>
+
+      <!-- 样例帖说明：演示数据必须说明白，不能让人误以为是真实网友发言 -->
+      <p class="forum-sample-note">
+        上面是<b>结构演示用的样例帖子</b>，不是真实用户发言——论坛开通后这里会换成大家真实发布的帖子。
+      </p>
+
+      <!-- 社区规则与审核说明（法规要求：用户生成内容必须有人管审核，自动过滤不够） -->
+      <section class="guide-block" aria-labelledby="rule-title">
+        <h3 class="guide-title" id="rule-title">发帖前先看：社区规则与审核</h3>
+        <ol class="guide-steps">
+          <li><div class="gs-body"><b>只谈事实与出处</b><span class="gs-desc">说清在哪看到的、原文怎么讲。不猜测动机，不对人下判断，不转发未打码的隐私信息。</span></div></li>
+          <li><div class="gs-body"><b>发帖先进审核队列</b><span class="gs-desc">所有帖子先由人工审核，通过后才对所有人可见；被驳回会附上理由，改好可以再发。</span></div></li>
+          <li><div class="gs-body"><b>这些会被驳回</b><span class="gs-desc">未证实的实名指控、涉及他人隐私的截图、违法内容，以及纯广告与引流。</span></div></li>
+          <li><div class="gs-body"><b>找线索优先于下结论</b><span class="gs-desc">论坛的目标是凑齐证据（原始链接、发布时间、发布者），不是投票表决真假。</span></div></li>
+        </ol>
+        <p class="guide-note">
+          审核规则与责任人在论坛上线前确定并公示（法规要求）。在此之前论坛只展示样例帖子，不接收公开发言。
+        </p>
+      </section>
     </section>
   </main>
 
@@ -163,5 +214,6 @@
   <script src="js/data.js"></script>
   <script src="js/home.js"></script>
   <script src="js/search.js"></script>
+  <script src="js/forum.js"></script>
 </body>
 </html>

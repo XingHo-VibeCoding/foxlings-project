@@ -161,3 +161,32 @@ function mountDemoBanner() {
 function getIdFromUrl() {
   return new URLSearchParams(location.search).get("id");
 }
+
+/* ============================================================
+   Day 19：全站共用的小工具与本地存储键（做论坛时上移到公共层）
+   来源：escHtml 原在 search.js、readJSON 与三个键名原在 mine.js / detail.js
+        各写一份。论坛（forum.js）要往同一个键里暂存线索、也要转义用户输入，
+        故上移到三页都会加载的 data.js —— 「同一份数据只有一个定义」，
+        将来接后端替换本地存储时也只改这一处。
+   ============================================================ */
+
+/** 本地存储键（api-contract.md 第一节「本地存储」表的唯一实现） */
+const FAV_KEY = "fx_favs";        // 收藏的条目 id 列表（detail.js 写 / mine.js 读）
+const HIST_KEY = "fx_history";    // 浏览足迹 {id, at}[]（detail.js 写 / mine.js 读）
+const REP_KEY = "fx_myreports";   // 我提交的待核查线索 {text, at}[]（mine.js 与论坛共用）
+const HIST_MAX = 20;              // 浏览足迹最多保留几条
+
+/** 读 localStorage 里的 JSON：不存在或坏了都退回默认值（不让页面挂掉） */
+function readJSON(key, fallback) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key));
+    return v == null ? fallback : v;
+  } catch (e) { return fallback; }
+}
+
+/** 用户可控文本拼进 HTML 之前必须转义（检索词、帖子标题与正文都走它） */
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}

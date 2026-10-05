@@ -34,7 +34,11 @@
 |---|---|---|---|
 | `fx_favs` | string[]（条目 id） | detail.js（收藏按钮） | mine.js（收藏列表） |
 | `fx_history` | `{id, at}[]` 最多 20 条 | detail.js（进详情页记录） | mine.js（浏览足迹） |
-| `fx_myreports` | `{text, at}[]` 最多 50 条 | mine.js（线索本地暂存） | mine.js |
+| `fx_myreports` | `{text, at}[]` 最多 50 条 | mine.js（线索本地暂存）**与 forum.js（论坛发帖暂存，Day 19 起）** | mine.js |
+
+> **Day 19**：`escHtml` / `readJSON` / 上述三个键名统一上移到 `js/data.js`（三页都会加载的公共层）
+> —— 论坛要往同一个 `fx_myreports` 写线索，同一份数据只允许有一个定义，接后端替换时也只改这一处。
+> 所以「同一份数据只有一个定义」这条纪律在本地存储层先是靠这一处集中的常量来兜底的。
 
 ---
 
@@ -56,7 +60,7 @@
 | `/api/items` | GET | 条目列表（支持 range / verdict / q / 分页）——替代 data.json | 待接后端 |
 | `/api/items/:id` | GET | 单条详情 | 待接后端 |
 | `/api/search` | POST | 查询检索：站内命中 + 联网搜索 + AI 整合摘要（L3）。**Day 17 起 L1（站内检索）与 L2（查证四步清单）已用纯静态实现上线**（`js/search.js`）；**Day 18 起检索页拆为两模块：站内搜索 / 全网溯源，溯源结果分「官方来源」「网络来源」两组**——现在的两组入口是人工跳转（site: 限定搜索 + 平台直达），后端接通后把这两组升级为自动抓取 + AI 摘要，返回结构应保持 `official` / `web` 两组划分 | 待接后端 |
-| `/api/posts` | GET / POST | 论坛帖子（F3，含审核流） | 待接后端 |
+| `/api/posts` | GET / POST | 论坛帖子（F3，含审核流）。**Day 19 起界面骨架已上线**（`js/forum.js` 读 `data/posts.json`），字段与 `db/schema.sql` 的 posts 表对齐，另需两个展示字段：`category`（分类：求助溯源 / 已解决 / 经验讨论，接入时补进表结构）与 `replies`（回复数，将来由回复表聚合）。GET 默认只返回 `status = 'approved'`（界面已按此过滤并单列「待审核」计数）；POST 一律写 `status = 'pending'` | 待接后端 |
 
 **约定**：
 

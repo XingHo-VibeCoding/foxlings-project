@@ -388,7 +388,61 @@ body {
 .trace-tip b { color: var(--c-text); }
 .trace-tip a { color: var(--c-primary); }
 
-/* ---------- 占位视图（论坛，本期未开工） ---------- */
+/* ---------- 论坛（F3 骨架先行 · Day 19） ---------- */
+/* 发帖区：后端接通前只能暂存本机，故做成「说明在前、动作在后」的低调形态 */
+.forum-compose {
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 16px 18px; margin-bottom: 16px;
+}
+.compose-title { font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.compose-title .soon {
+  font-size: 12px; font-weight: normal; padding: 3px 10px; border-radius: 12px;
+  background: var(--c-doubt-soft); color: var(--c-doubt-deep);
+}
+.compose-label { display: block; font-size: 13px; color: var(--c-muted); margin-bottom: 8px; }
+.forum-compose .rep-input { margin: 0 0 10px; }
+.compose-note { font-size: 12px; color: var(--c-muted); margin-top: 10px; }
+.compose-note a { color: var(--c-primary); }
+.compose-note.note-ok { color: var(--c-true-deep); }
+.compose-note.note-warn { color: var(--c-fake-deep); }
+
+/* 工具栏：分类 chip 与关键词框一行，窄屏自动换行 */
+.forum-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.forum-toolbar .filter-bar { flex: 1; margin: 0; }
+.forum-toolbar .board-search { max-width: 240px; }
+
+/* 帖子列表：与辟谣榜卡片同族（同圆角、同阴影、同悬停抬升），
+   但整体是 <article> 不是链接 —— 帖子详情与回复要等后端，先不做整卡可点。 */
+.post-list { display: flex; flex-direction: column; gap: 12px; }
+.post-card {
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  border-left: 4px solid var(--c-line); padding: 16px;
+  transition: transform .25s, box-shadow .25s;
+}
+.post-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-hover); }
+.post-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 分类标签：白底 + 主色字 + 灰描边（主色对白底 5.06:1，达 AA）。
+   分类不是核查结论，故不复用结论四色 —— 三档靠文字区分（C5 文案通道）。 */
+.post-cat {
+  display: inline-block; font-size: 12px; padding: 4px 12px; border-radius: 12px;
+  background: var(--c-card); color: var(--c-primary); border: 1px solid var(--c-chip-border);
+}
+.post-replies { font-size: 12px; color: var(--c-muted); }
+.post-date { font-size: 12px; color: var(--c-muted); margin-left: auto; }
+.post-title { font-size: 16px; margin: 8px 0; }
+.post-body { font-size: 13px; color: var(--c-summary); margin-bottom: 8px; }
+.post-meta { font-size: 12px; color: var(--c-muted); }
+.post-rel { font-size: 13px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--c-line-soft); }
+.post-rel a { color: var(--c-primary); }
+
+/* 样例帖说明：演示数据必须说明白，不能让人误以为是真实网友发言 */
+.forum-sample-note {
+  font-size: 12px; color: var(--c-muted); margin-bottom: 16px;
+  padding: 10px 14px; background: var(--c-stat-bg); border-radius: 10px;
+}
+.forum-sample-note b { color: var(--c-text); }
+
+/* ---------- 占位视图（Day 19 起论坛已换成真骨架，本段暂留作将来可能的占位页） ---------- */
 .placeholder {
   background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
   padding: 28px 20px; text-align: center;

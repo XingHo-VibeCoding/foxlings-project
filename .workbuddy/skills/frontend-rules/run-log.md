@@ -119,3 +119,12 @@
 观察项：N7_四态明细 = {loading:true, empty:true, error:true, normal:true}；M1 溢出合计 0px；标签对比度 5.79~6.92:1。
 
 **本次 Skill 自身的变更**：新增 N 组 8 条断言（路由 + 四态）；SKILL.md 新增「五、视图路由与列表四态」9 条规则（N1–N9），原五/六节顺延为六/七节；已知边界补充 hash 路由取舍与 ?demo= 上线前须删。
+
+## 2026-10-05 深夜（Day 19 · 论坛骨架落地后全量检查）
+
+- **调用方式**：手动调用脚本（项目根 http.server 8000 已起）
+- **被检查对象**：index.html（view-forum 由占位块换真骨架）、js/forum.js（新建）、js/data.js（公共层上移：escHtml / readJSON / 本地存储键）、js/search.js、js/mine.js、js/detail.js（删除各自的重复定义）、css/style.css（论坛样式段）
+- **Skill 自身变更**：新增 **F 组 9 条**（论坛）：F1 占位已换真骨架、F2 未过审帖子不进公开列表、F3 分类筛选生效、F4 无命中给清空出口、F5 发帖区标注开发中、F6 样例帖已标明、F7 审核规则已写明、F8 发帖暂存写同一键（fx_myreports）、F9 论坛按钮 ≥44px；S2 选择器收窄到 `#view-search`（论坛也有 .guide-steps，不收窄会数成 8 步）；硬门槛 74 → **83**
+- **结果**：首跑 FAIL 1 项（S2 被论坛的清单步数污染）→ 收窄选择器后复跑 **ALL_PASS（83 项硬门槛全过，退出码 0）**
+- **观察项**：M1 三档 × 六页溢出合计 0px；标签对比度 5.79~6.92:1；N7 四态明细全 true；C7 字号 12~22 未越界
+- **数据守卫**：F2/F3/F4 的期望值全部从 data/posts.json 现算（approved 条数、待审样例标题），不写死；没有待审样例时 F2 直接 FAIL，不静默通过

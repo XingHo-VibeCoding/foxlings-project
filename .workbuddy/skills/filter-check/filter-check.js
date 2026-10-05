@@ -21,7 +21,14 @@
    Day 17 变更记录（新增检索页）：
      · 登记 `search` 组件（首页·查询检索）——它有与筛选同构的三态：
        有结果 / 无结果 / 清空恢复（回到未输入的引导态），基线条数是 0。
-       这不是新写一套断言，而是把同一个通用内核接到新组件上。 */
+       这不是新写一套断言，而是把同一个通用内核接到新组件上。
+
+   Day 19 变更记录（新增论坛）：
+     · 登记 `forum` 组件（首页·论坛）——分类 chip + 关键词框叠加，基线条数从
+       data/posts.json 现算（只算 approved，待审帖不进公开列表）。关键词带守卫：
+       数据里查不到该词就直接报错退出，不让「0 条 == 0 条」假通过；
+     · 内核加了一个可配置项 `tagSel`（默认 '.tag'）：论坛的分类标签类名是 .post-cat
+       而不是结论标签 .tag —— 只把选择器变成可配置，断言强度不变。 */
 const fs = require('fs');
 const pw = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
@@ -35,6 +42,19 @@ const EMPTY_TEXT = '没有找到相关内容'; // 全站统一的无结果文案
 const ROOT = 'D:/AI/foxlings-project';
 const ITEMS = (JSON.parse(fs.readFileSync(ROOT + '/data/data.json', 'utf8')).items) || [];
 if (!ITEMS.length) { console.error('脚本失败: data/data.json 里没有可用条目'); process.exit(1); }
+
+/* 论坛帖子（Day 19）：公开列表 = 只算 approved */
+const POSTS = (JSON.parse(fs.readFileSync(ROOT + '/data/posts.json', 'utf8')).posts) || [];
+const OK_POSTS = POSTS.filter((p) => p.status === 'approved');
+if (!OK_POSTS.length) { console.error('脚本失败: data/posts.json 里没有已通过的帖子'); process.exit(1); }
+const FORUM_CAT = '已解决';
+const FORUM_CAT_COUNT = OK_POSTS.filter((p) => p.category === FORUM_CAT).length;
+const FORUM_KW = '养老金';
+const FORUM_KW_COUNT = OK_POSTS.filter((p) => (p.title + p.body).indexOf(FORUM_KW) !== -1).length;
+if (!FORUM_CAT_COUNT || !FORUM_KW_COUNT) {
+  console.error('脚本失败: posts.json 里「' + FORUM_CAT + '」或「' + FORUM_KW + '」查不到，请改用例值');
+  process.exit(1);
+}
 
 /** 年榜（365 天内）= 全量视图下的基线，与「今天」无关，不会随时间流逝而失效 */
 const inYear = (it) => {
@@ -119,6 +139,26 @@ const COMPS = {
     summary: '#search-summary',
     baseline: 0
   },
+  forum: {
+    /* Day 19 新增：论坛（F3 骨架）—— 分类 chip + 关键词框叠加，与 board 同一套三态；
+       基线只算 approved（待审帖不进公开列表），同类断言一条不少。 */
+    label: '首页·论坛',
+    prepare: async (page) => {
+      await page.goto(BASE + '/#/forum', { waitUntil: 'networkidle' });
+      await page.waitForSelector('#forum-list .post-card');
+      await page.waitForTimeout(300);
+    },
+    chips: '#forum-cats .chip',
+    chipKey: 'data-cat',
+    hitChip: { value: FORUM_CAT, count: FORUM_CAT_COUNT },
+    hitKeyword: { value: FORUM_KW, count: FORUM_KW_COUNT },
+    tagSel: '.post-cat',   // 分类标签不是结论标签，类名可配置（内核新增项）
+    list: '#forum-list',
+    itemSel: '.post-card',
+    search: '#forum-search',
+    summary: '#forum-summary',
+    baseline: OK_POSTS.length
+  },
   favs: {
     label: '个人主页·我的收藏',
     prepare: async (page) => {
@@ -177,7 +217,7 @@ async function checkComp(page, key, cfg, R) {
       await chip.click();
       await page.waitForTimeout(350);
       R[p + 'A1_条件有结果_条数'] = (await items().count()) === cfg.hitChip.count;
-      const tags = await page.locator(cfg.list + ' .tag').allTextContents();
+      const tags = await page.locator(cfg.list + ' ' + (cfg.tagSel || '.tag')).allTextContents();
       R[p + 'A1_条件有结果_内容匹配'] = tags.length > 0 && tags.every((t) => t.trim() === cfg.hitChip.value);
       const s1 = await textOf(page, cfg.summary);
       R[p + 'C1_计数反映条件'] = s1 !== null &&
@@ -261,7 +301,7 @@ async function checkComp(page, key, cfg, R) {
 /* ---------------- 主流程 ---------------- */
 (async () => {
   const want = process.argv.slice(2);
-  const keys = want.length ? want : ['board', 'search', 'favs'];
+  const keys = want.length ? want : ['board', 'search', 'forum', 'favs'];
   const R = {};
   const browser = await pw.chromium.launch({ executablePath: EDGE, headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 790 } });

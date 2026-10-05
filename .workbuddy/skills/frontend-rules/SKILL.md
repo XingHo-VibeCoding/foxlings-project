@@ -1,6 +1,6 @@
 ---
 name: frontend-rules
-description: 本项目（热门时事真伪辨别网站）已经拍板的前端规范——页面层级、颜色与字体、卡片与按钮、移动端适配、修改前检查、修改后验证。改动任何 HTML/CSS/JS 之前先读它，改动之后用它验证。适用于首页 index.html、详情页 detail.html、css/style.css、js/*.js 的任何视觉或结构改动。
+description: 本项目（热门时事真伪辨别网站）已经拍板的前端规范——页面层级、颜色与字体、卡片与按钮、移动端适配、修改前检查、修改后验证。改动任何 HTML/CSS/JS 之前先读它，改动之后用它验证。适用于首页 index.html、详情页 detail.html、个人主页 mine.html、css/style.css、js/*.js 的任何视觉或结构改动。
 agent_created: true
 ---
 
@@ -21,6 +21,20 @@ agent_created: true
   页内模块切换**不算换视图**——hashchange 只在视图真变时才滚回页首
 - **S 组断言 3 → 9 条**（硬门槛 68 → 74）：站内无命中给溯源出口、官方/网络两组成组且新标签打开、
   入口带关键词直达、两模块互斥且高亮唯一、溯源随关键词刷新且清空回引导、溯源可深链
+
+## Day 19 结构变更（2026-10-05，论坛骨架落地）
+
+- **论坛（F3）从占位块换成真骨架**：帖子列表（读 `data/posts.json`）+ 分类/关键词两组筛选 +
+  发帖暂存本机 + 社区规则与审核说明；账号、公开发布、回复与人工审核待接后端
+- **审核机制先进界面**：列表只渲染 `status = approved` 的帖子，页头徽卡单列「待审核」条数——
+  后端接通前就让「未过审 = 不可见」这条规则立在界面上
+- **公共层上移**：`escHtml`、`readJSON`、本地存储键（`FAV_KEY` / `HIST_KEY` / `REP_KEY` / `HIST_MAX`）
+  从 search.js / mine.js / detail.js 各写一份，上移到三页都会加载的 `data.js`——
+  论坛要往同一个键（`fx_myreports`）暂存线索，**同一份数据只能有一个定义**
+- **断言同步**：新增 **F 组 9 条**（论坛），硬门槛 74 → **83**；S2 的选择器收窄到 `#view-search`
+  （论坛也有 `.guide-steps`，不收窄会数成 8 步）
+- **修正本文件两处过期说法**：N1/N2 的视图名（Day 15 起是 `#/board` / `#/search` / `#/forum`，
+  原 `#/feed` / `#/favs` 已废）、执行方式里已删除的 `filter3-check.js`
 
 ## 它管什么（一句话）
 
@@ -135,8 +149,8 @@ agent_created: true
 
 | 规则 | 内容 |
 |---|---|
-| B10 | 三处列表（首页卡片流、首页辟谣榜、详情页信源比对）都要有关键词筛选：**输入即过滤**（input 实时过滤，无后端），与该处既有筛选条件（结论 chip / 时间档）**叠加**生效 |
-| B11 | 无匹配一律显示**「没有找到相关内容」**+ 一个清空出口按钮；清空关键词后恢复当前条件下的完整列表。既有条件也没了时出口语义要跟着变（卡片流：仅关键词→「清空关键词」，关键词+结论→「清空全部筛选」） |
+| B10 | **四处列表**（辟谣榜、检索页站内结果、论坛帖子、详情页信源）都要有关键词筛选：**输入即过滤**（input 实时过滤，无后端），与该处既有筛选条件（结论 chip / 时间档 / 帖子分类）**叠加**生效 |
+| B11 | 无匹配一律显示**「没有找到相关内容」**+ 一个清空出口按钮；清空关键词后恢复当前条件下的完整列表。既有条件也没了时出口语义要跟着变（辟谣榜：仅关键词→「清空关键词」，关键词+结论→「清空全部筛选」；论坛同此规则） |
 | B12 | 搜索框统一 `.filter-search`（44px 触控高度 + `aria-label`）；结果计数文案要同时反映结论与关键词两个条件（如「筛选「假」 + 关键词「加油站」：共 1 条」） |
 
 ## 四、移动端适配
@@ -158,8 +172,8 @@ agent_created: true
 
 | 规则 | 内容 |
 |---|---|
-| N1 | 首页三个视图用**手写 hash 路由**驱动：`#/feed`、`#/board`、`#/favs`。切换必须改地址栏（`location.hash`），由 `hashchange` 统一落到界面——不引入路由库 |
-| N2 | 首屏加载要把地址栏规范化成 `#/feed`（用 `history.replaceState`，不额外产生历史记录）；空 hash 或非法值一律回落到 `#/feed`，**不许白屏** |
+| N1 | 首页三个视图用**手写 hash 路由**驱动：`#/board`（默认）、`#/search`、`#/forum`（Day 15 起；检索页的二级模块形如 `#/search/inside`、`#/search/trace`）。切换必须改地址栏（`location.hash`），由 `hashchange` 统一落到界面——不引入路由库 |
+| N2 | 首屏加载要把地址栏规范化成默认视图 `#/board`（用 `history.replaceState`，不额外产生历史记录）；空 hash 或非法值一律回落到 `#/board`，**不许白屏** |
 | N3 | 任何"切视图"的地方都必须走 `goToView()` 这一个入口（含空态里的跳转按钮），不许直接操作 class，否则前进后退会错乱 |
 | N4 | 视图标签要有完整 tab 语义：容器 `role="tablist"`、标签 `role="tab"` + `aria-selected` + `aria-controls`；面板 `role="tabpanel"` + `aria-labelledby`；非当前标签 `tabindex="-1"`（Tab 键只停在当前项），并支持 ← → / Home / End |
 | N5 | 视图切换成功的同时更新 `document.title`（非默认视图加前缀，如「辟谣榜 · 热门时事真伪辨别」），让多标签用户的标签页可分辨 |
@@ -197,11 +211,14 @@ python -m http.server 8000 --bind 127.0.0.1
 # 另开一个终端，跑检查
 node .workbuddy/skills/frontend-rules/check-frontend.js
 
-# 改动涉及三处列表筛选（卡片流 / 辟谣榜 / 信源）时，加跑功能测试
-node .workbuddy/skills/frontend-rules/filter3-check.js
+# 改动涉及列表筛选（辟谣榜 / 检索页 / 论坛 / 收藏 / 信源）时，加跑 filter-check
+node .workbuddy/skills/filter-check/filter-check.js
 ```
 
-脚本分七组：**L** 页面层级 / **C** 颜色与字体 / **B** 卡片与按钮 / **M** 移动端 / **N** 路由与四态 / **R** 回归底线 / **O** 观察项。
+脚本分九组：**L** 页面层级 / **C** 颜色与字体 / **B** 卡片与按钮 / **M** 移动端 / **N** 路由与四态 / **S** 检索页 / **F** 论坛 / **R** 回归底线 / **O** 观察项。
+
+> `filter3-check.js` 已于 Day 16 删除（还写着 Day 12 的旧结构 `#feed-search`，无任何引用）；
+> 列表筛选检查统一由 `.workbuddy/skills/filter-check` 承担。
 
 - 打印 JSON 结果 + `ALL_PASS` 或 `FAIL: xxx`
 - 硬门槛失败时以退出码 1 结束

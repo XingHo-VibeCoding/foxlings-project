@@ -72,7 +72,7 @@ function fallbackCopy(text) {
    状态机与反馈逻辑不动。
    ============================================================ */
 
-const FAV_KEY = "fx_favs";       // 收藏 id 列表
+/* FAV_KEY（收藏键名）Day 19 上移到 data.js 公共层，本页直接使用不再声明 */
 const FAV_FAIL_KEY = "fx_fav_fail"; // 失败模拟开关（测试用：设为 "1" 强制失败）
 let currentItemId = "";          // 当前详情页条目 id（收藏按钮操作目标）
 
@@ -341,8 +341,7 @@ async function initDetail() {
    只记 id + 时间，最多留 20 条；无痕模式写不进去也不影响页面。
    ============================================================ */
 
-const HIST_KEY = "fx_history";
-const HIST_MAX = 20;
+/* HIST_KEY / HIST_MAX（浏览足迹键名与上限）Day 19 上移到 data.js 公共层 */
 
 function recordHistory(id) {
   if (!id) return;

@@ -7,21 +7,11 @@
      ④ 关于与方法论 静态文案（写在 mine.html 里）
    ============================================================ */
 
-const FAV_KEY = "fx_favs";
-const HIST_KEY = "fx_history";
-const REP_KEY = "fx_myreports";
-const HIST_MAX = 20;
+/* 本地存储键（FAV_KEY / HIST_KEY / REP_KEY / HIST_MAX）与 readJSON
+   在 data.js 里统一定义（Day 19 上移到公共层）——本页直接使用，不再重复声明。 */
 
 let ITEMS = [];
 let DATA_STATE = "loading";
-
-/** 读 localStorage 里的 JSON，坏了或不存在都退回默认值（不让页面挂掉） */
-function readJSON(key, fallback) {
-  try {
-    const v = JSON.parse(localStorage.getItem(key));
-    return v == null ? fallback : v;
-  } catch (e) { return fallback; }
-}
 
 /** 结论标签（与 home.js / detail.js 保持同一套类名） */
 function verdictTag(verdict) {

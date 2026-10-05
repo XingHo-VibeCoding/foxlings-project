@@ -17,12 +17,8 @@ let searchKeyword = ""; // 输入框当前内容（两个模块共用；清空�
 const SEARCH_MODES = ["inside", "trace"];
 const MODE_LABELS = { inside: "站内搜索", trace: "全网溯源" };
 
-/** 把用户输入转义后再拼进 HTML —— 检索词是用户可控文本，不能直接当 HTML 用 */
-function escHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => (
-    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-  ));
-}
+/* escHtml（用户输入转义）Day 19 上移到 data.js 公共层 —— 论坛也要用同一份实现，
+   这里不再重复定义，只保留调用。 */
 
 /**
  * 当前模块：以地址栏为唯一真相。

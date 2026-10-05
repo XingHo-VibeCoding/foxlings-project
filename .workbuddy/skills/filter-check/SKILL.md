@@ -22,6 +22,7 @@ agent_created: true
 |---|---|---|---|---|---|
 | `board` | index.html · 辟谣榜（默认视图，原「热点卡片流」已并入） | `#verdict-filter` | `#board-search` | `#board-list` | `#filter-summary` |
 | `search` | index.html · 查询检索（主打功能，Day 17 起） | 无 | `#search-input` | `#search-results` | `#search-summary` |
+| `forum` | index.html · 论坛（F3 骨架，Day 19 起） | `#forum-cats` | `#forum-search` | `#forum-list` | `#forum-summary` |
 | `source` | detail.html?id= · 信源比对 | 无 | `#source-search` | `#source-cards` | `#source-summary` |
 | `favs` | mine.html · 个人主页·我的收藏 | 无 | `#fav-search` | `#mine-fav-list` | `#fav-summary` |
 
@@ -30,6 +31,12 @@ agent_created: true
 **Day 17 变更（2026-10-05）**：登记 `search` 组件——查询检索页与筛选组件同构（有结果 / 无结果 / 清空恢复），基线条数是 0（未输入时结果区只显示引导，不预渲染卡片）；它的命中关键词带守卫，数据里查不到该词时脚本直接报错退出，不让「0 条 == 0 条」假通过。
 
 **Day 18 变更（2026-10-05）**：检索页拆成两个模块（站内搜索 / 全网溯源）后，本 Skill 仍只登记 `search`（站内模块，容器与选择器未变）；**溯源模块（`#trace-results`）不套通用内核**——它是「入口卡片组」不是筛选列表，没有「无结果出口按钮」这一态，硬套会让通用断言失真。溯源模块的三态（未输入引导 / 有词出两组入口 / 清空回引导）改由 frontend-rules 的 S 组断言覆盖（S4–S6、S9）。
+
+**Day 19 变更（2026-10-05）**：登记 `forum` 组件（首页·论坛）——分类 chip + 关键词框叠加，
+与 `board` 完全同构，所以直接接同一个通用内核；基线条数从 `data/posts.json` 现算（**只算 approved**，
+待审帖不进公开列表，内核的零条目断言因此同时验了「审核过滤」生效）；关键词「养老金」带守卫，
+数据里查不到就直接报错退出。**内核新增可配置项 `tagSel`**（默认 `.tag`）：论坛的分类标签类名是
+`.post-cat` 而不是结论标签 —— 只把选择器变成可配置，断言强度一条不减。
 
 **新组件接入方式**：在 `filter-check.js` 的 `COMPS` 里加一条配置（选择器 + 基线条数 + 有/无结果用例），无需改内核。
 
@@ -75,7 +82,7 @@ agent_created: true
 # 项目根目录先起服务器
 python -m http.server 8000 --bind 127.0.0.1
 
-# 另开终端：全部已登记组件都查
+# 另开终端：全部已登记组件都查（board / search / forum / favs + source 单独指定）
 node .workbuddy/skills/filter-check/filter-check.js
 
 # 只查某一个组件
@@ -92,5 +99,8 @@ node .workbuddy/skills/filter-check/filter-check.js favs
 ## 已知边界
 
 - 只覆盖「本地静态筛选与站内检索」（`search` 组件即是站内检索的 L1 部分），不覆盖后端检索（L3 自动联网 + AI 整合，待接后端）。
-- 用例取值依赖 demo 数据分布（假=1、存疑=4、真=0）；数据换了之后各组件配置里的用例要跟着换。
-- `board` 无计数元素、`favs`（v1）无条件筛选，属已知现状；清单里缺少的项会如实标记为 FAIL，不跳过。
+- **用例取值不依赖数据分布**：基线条数、某结论的条数、某关键词的条数一律从 `data/data.json` /
+  `data/posts.json` 现算（Day 16 起）；只有「挑哪个关键词当用例」是写死的，且带守卫——
+  数据里查不到就直接报错退出，不会让「0 条 == 0 条」静默通过。
+- `board` 与 `favs` 现在都有计数元素（`#filter-summary` / `#fav-summary`）与关键词框，
+  内核里的对应断言一律照常执行，没有豁免项。
