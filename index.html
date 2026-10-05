@@ -65,21 +65,46 @@
       <div id="board-list" class="card-list"></div>
     </section>
 
-    <!-- 视图二：查询检索（主打功能 · 骨架先行，后端接通后点亮自动联网 + AI 整合） -->
+    <!-- 视图二：查询检索（主打功能）
+         本期已完成（纯静态可做）：L1 站内检索 + 多源检索入口 + L2「自己怎么验」四步清单；
+         L3 自动联网 + AI 整合摘要待接后端点亮（见 api-contract.md 第三节 /api/search）。 -->
     <section id="view-search" class="view" role="tabpanel" aria-labelledby="tab-search" tabindex="0" aria-label="查询检索">
       <div class="view-head">
         <div>
           <h2 class="view-title">查询检索</h2>
-          <p class="view-sub">看到一条消息拿不准？先在这里查一查</p>
+          <p class="view-sub">看到一条消息拿不准？把关键词丢进来，先查站内已核查的条目</p>
         </div>
       </div>
-      <div class="placeholder">
-        <div class="placeholder-icon" aria-hidden="true">?</div>
-        <h3 class="placeholder-lead">这个功能正在建设中</h3>
-        <p>规划中的检索器分三步帮你查证：先在站内已核查库里搜；没命中就一键把关键词同时投向多个平台，看权威媒体怎么说；再附一份「自己怎么验一条消息」的步骤清单。</p>
-        <p>其中的<b>自动联网检索 + AI 整合摘要</b>需要后端支持，排在后面的施工板块里。</p>
-        <span class="soon">开发中</span>
+
+      <form class="search-form" id="search-form" role="search">
+        <input type="search" id="search-input" class="search-input" autocomplete="off"
+               placeholder="输入关键词，如「养老金」「医保」" aria-label="输入要查证的消息关键词">
+        <button type="submit" class="search-go">查证</button>
+      </form>
+
+      <div class="search-samples" id="search-samples" role="group" aria-label="示例查询">
+        <span class="sample-label">试试搜：</span>
+        <button type="button" class="chip" data-sample="养老金">养老金</button>
+        <button type="button" class="chip" data-sample="医保">医保</button>
+        <button type="button" class="chip" data-sample="台风">台风</button>
       </div>
+
+      <p class="search-summary" id="search-summary" aria-live="polite">正在加载站内核查库…</p>
+      <div id="search-results" class="search-results"></div>
+
+      <!-- L2 引导式查证清单：本站「证据整理员」定位最实在的抓手，纯静态即可用 -->
+      <section class="guide-block" aria-labelledby="guide-title">
+        <h3 class="guide-title" id="guide-title">站内没查到？自己这样验一遍</h3>
+        <ol class="guide-steps">
+          <li><div class="gs-body"><b>找最早出处</b><span class="gs-desc">最早是谁发的？原文现在还打得开吗？截图有没有裁掉上下文的痕迹？</span></div></li>
+          <li><div class="gs-body"><b>看权威有没有报</b><span class="gs-desc">新华社、央视、政府官网有没有说过这件事——权威渠道集体沉默，本身就是个信号。</span></div></li>
+          <li><div class="gs-body"><b>搜有没有被辟过谣</b><span class="gs-desc">去中国互联网联合辟谣平台、腾讯较真搜关键词，同类谣言往往早被点过名。</span></div></li>
+          <li><div class="gs-body"><b>看时间地点对不对</b><span class="gs-desc">把年份、地名、数字对一遍：老谣言换个年份重新发，是最常见的套路。</span></div></li>
+        </ol>
+        <p class="guide-note">四步走完还是拿不准？<a href="index.html#/forum">发到论坛</a>，让大家一起帮你溯源。</p>
+      </section>
+
+      <p class="search-soon"><span class="soon">AI 整合检索 · 开发中</span>自动联网搜索 + AI 整合摘要需要后端支持，接通后结果会显示在这里。</p>
     </section>
 
     <!-- 视图三：论坛（骨架先行） -->
@@ -113,5 +138,6 @@
 
   <script src="js/data.js"></script>
   <script src="js/home.js"></script>
+  <script src="js/search.js"></script>
 </body>
 </html>

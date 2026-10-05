@@ -27,21 +27,30 @@ function sortByHeat(items) {
   );
 }
 
-/** 渲染单条榜单卡片（对应 PRD A1：标题 / 结论标签 / 摘要 / 更新日期） */
-function renderCard(item, index) {
+/**
+ * 渲染单条卡片（对应 PRD A1：标题 / 结论标签 / 摘要 / 更新日期）
+ * @param {Object} item
+ * @param {number} index 用于入场动画错峰
+ * @param {Object} [opts] rank:false 时不渲染榜单序号（检索结果是清单，不是榜单）
+ */
+function renderCard(item, index, opts) {
+  opts = opts || {};
   const card = document.createElement("a");
   card.className = "card pop";
   card.href = "detail.html?id=" + encodeURIComponent(item.id);
   card.dataset.verdict = item.verdict;          // 驱动左侧结论色条（装饰 D4）
   card.style.animationDelay = (index * 0.06) + "s";
 
-  const rank = String(index + 1).padStart(2, "0");  // 装饰 D3：01 / 02 / 03
+  const rank = opts.rank === false
+    ? ""
+    : '<span class="card-rank" aria-hidden="true">' +
+      String(index + 1).padStart(2, "0") + "</span>";   // 装饰 D3：01 / 02 / 03
   const heat = item.heat_note
     ? '<span class="heat-badge">' + item.heat_note + "</span>"   // 装饰 D5
     : "";
 
   card.innerHTML =
-    '<span class="card-rank" aria-hidden="true">' + rank + "</span>" +
+    rank +
     '<div class="card-body">' +
       '<div class="card-top">' + verdictTag(item.verdict) + heat +
       '<span class="card-date">更新于 ' + item.updated_at + "</span></div>" +
@@ -59,9 +68,16 @@ function renderCard(item, index) {
 
 let DATA_STATE = "loading";
 
-/** 所有需要重绘的视图（新视图加进来时在这里挂一笔） */
+/**
+ * 各视图的渲染函数登记表。
+ * 新视图（如查询检索）在自己的 js 文件里 push 进来即可，
+ * 数据就绪 / 切视图时统一重绘——不用回头改这里。
+ */
+const VIEW_RENDERERS = [renderBoard];
+
+/** 所有需要重绘的视图 */
 function renderAllViews() {
-  renderBoard();
+  VIEW_RENDERERS.forEach((render) => render());
 }
 
 /**

@@ -287,7 +287,69 @@ body {
 .crumb-sep { color: var(--c-muted); }
 .breadcrumb [aria-current="page"] { color: var(--c-text); }
 
-/* ---------- 占位视图（查询检索 / 论坛，本期未开工） ---------- */
+/* ---------- 查询检索（主打功能 · 骨架） ---------- */
+.search-form { display: flex; gap: 8px; margin: 4px 0 12px; }
+.search-input {
+  flex: 1; min-width: 0; min-height: 48px;
+  border: 1px solid var(--c-input-border); border-radius: 12px;
+  padding: 12px 16px; font-size: 15px; font-family: inherit;
+  background: var(--c-card); color: var(--c-text); outline: none;
+  transition: box-shadow .3s, border-color .3s;
+}
+.search-input:focus { box-shadow: 0 0 0 3px rgba(59, 91, 253, .15); border-color: var(--c-primary); }
+.search-go {
+  flex-shrink: 0; border: none; border-radius: 12px; padding: 0 22px; min-height: 48px;
+  background: var(--c-primary); color: var(--c-white); font-size: 15px; cursor: pointer;
+  transition: background .25s;
+}
+.search-go:hover { background: var(--c-primary-dark); }
+
+.search-samples { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.sample-label { font-size: 12px; color: var(--c-muted); }
+
+.search-summary { font-size: 12px; color: var(--c-muted); margin-bottom: 12px; }
+.search-results { margin-bottom: 16px; }
+
+/* 站内没命中时的站外检索入口（L1 兜底） */
+.src-jump { text-align: left; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--c-line-soft); }
+.src-jump-lead { font-size: 13px; color: var(--c-muted); margin-bottom: 10px; }
+.src-jump-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.jump-btn {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 10px 16px;
+  border-radius: 20px; border: 1px solid var(--c-chip-border); background: var(--c-card);
+  color: var(--c-primary); font-size: 13px; text-decoration: none;
+  transition: background .25s, border-color .25s;
+}
+.jump-btn:hover { background: var(--c-hover-bg); border-color: var(--c-primary); }
+
+/* L2 引导式查证清单：本站「证据整理员」定位最实在的抓手，纯静态即可用 */
+.guide-block {
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 18px; margin-bottom: 16px;
+}
+.guide-title { font-size: 16px; margin-bottom: 14px; }
+.guide-steps { list-style: none; counter-reset: gs; display: flex; flex-direction: column; gap: 14px; }
+.guide-steps li { display: flex; gap: 12px; font-size: 13px; }
+.guide-steps li::before {
+  counter-increment: gs; content: counter(gs);
+  flex-shrink: 0; width: 24px; height: 24px; margin-top: 1px; border-radius: 50%;
+  background: var(--c-hover-bg); color: var(--c-primary);
+  font-size: 12px; font-weight: bold; line-height: 24px; text-align: center;
+}
+.gs-body { min-width: 0; }
+.gs-body b { display: block; font-size: 14px; }
+.gs-desc { color: var(--c-muted); }
+.guide-note { font-size: 13px; color: var(--c-muted); margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--c-line-soft); }
+.guide-note a { color: var(--c-primary); }
+
+/* L3 占位行：还没做的能力如实标注，不假装已有 */
+.search-soon { font-size: 12px; color: var(--c-muted); margin-bottom: 20px; }
+.search-soon .soon {
+  display: inline-block; margin-right: 6px; padding: 3px 10px; border-radius: 12px;
+  background: var(--c-doubt-soft); color: var(--c-doubt-deep);
+}
+
+/* ---------- 占位视图（论坛，本期未开工） ---------- */
 .placeholder {
   background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
   padding: 28px 20px; text-align: center;

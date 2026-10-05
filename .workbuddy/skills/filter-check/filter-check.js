@@ -1,7 +1,7 @@
 /* filter-check.js — 检查【任意已登记列表组件】的筛选交互
    覆盖：三态（有结果 / 无结果 / 清空恢复）、零数据态、无障碍底线、回归底线
    用法：
-     node filter-check.js             # 检查默认组件（board + favs）
+     node filter-check.js             # 检查默认组件（board + search + favs）
      node filter-check.js board       # 只检查某个组件
      node filter-check.js board favs  # 检查多个
    前置：项目根目录已起 http.server 8000（--bind 127.0.0.1）
@@ -16,7 +16,12 @@
        某个结论的条数、某个关键词的条数），不再写死 5 / 4 / 1 这些魔术数字；
      · 挑哪一条来验（详情页信源、收藏对象）也从上往下现取，不再写死 demo-005。
      · 教训：写死数据值的检查脚本，数据一换就全线超时——看着像页面坏了，
-       其实是脚本自己过期了。断言强度没降，只是不再假设数据长什么样。 */
+       其实是脚本自己过期了。断言强度没降，只是不再假设数据长什么样。
+
+   Day 17 变更记录（新增检索页）：
+     · 登记 `search` 组件（首页·查询检索）——它有与筛选同构的三态：
+       有结果 / 无结果 / 清空恢复（回到未输入的引导态），基线条数是 0。
+       这不是新写一套断言，而是把同一个通用内核接到新组件上。 */
 const fs = require('fs');
 const pw = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
@@ -53,6 +58,14 @@ const FAV_IDS = ITEMS.slice(0, 2).map((i) => i.id);
 const FAV_KW = '养老金';
 const FAV_KW_COUNT = ITEMS.slice(0, 2).filter((i) => (i.title + i.summary).indexOf(FAV_KW) !== -1).length;
 
+/** 检索页的命中关键词：写死但带守卫——数据里一旦查不到这个词，
+    说明种子数据换了，脚本直接报错退出，而不是让断言「0 条 == 0 条」假通过 */
+const SEARCH_KW = '地铁';
+if (!countKeyword(SEARCH_KW)) {
+  console.error('脚本失败: 数据里没有「' + SEARCH_KW + '」——请换一个确实命中的关键词');
+  process.exit(1);
+}
+
 /* ---------------- 组件登记表：新组件接进来只需加一条 ---------------- */
 const COMPS = {
   board: {
@@ -87,6 +100,24 @@ const COMPS = {
     search: '#source-search',
     summary: '#source-summary',
     baseline: SAMPLE.sources.length
+  },
+  search: {
+    /* Day 17 新增：查询检索页的「三态」与筛选组件同构 ——
+       有结果 / 无结果（站内没命中）/ 清空恢复（回到未输入的引导态）。
+       基线是 0 条：没输关键词时结果区只显示引导，不预渲染任何卡片。 */
+    label: '首页·查询检索',
+    prepare: async (page) => {
+      await page.goto(BASE + '/#/search', { waitUntil: 'networkidle' });
+      await page.waitForSelector('#search-input');
+      await page.waitForTimeout(400);
+    },
+    chips: null,
+    hitKeyword: { value: SEARCH_KW, count: countKeyword(SEARCH_KW) },
+    list: '#search-results',
+    itemSel: '.card',
+    search: '#search-input',
+    summary: '#search-summary',
+    baseline: 0
   },
   favs: {
     label: '个人主页·我的收藏',
@@ -230,7 +261,7 @@ async function checkComp(page, key, cfg, R) {
 /* ---------------- 主流程 ---------------- */
 (async () => {
   const want = process.argv.slice(2);
-  const keys = want.length ? want : ['board', 'favs'];
+  const keys = want.length ? want : ['board', 'search', 'favs'];
   const R = {};
   const browser = await pw.chromium.launch({ executablePath: EDGE, headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 790 } });

@@ -21,10 +21,13 @@ agent_created: true
 | 组件 key | 页面 | 条件筛选器 | 关键词框 | 列表容器 | 计数 |
 |---|---|---|---|---|---|
 | `board` | index.html · 辟谣榜（默认视图，原「热点卡片流」已并入） | `#verdict-filter` | `#board-search` | `#board-list` | `#filter-summary` |
+| `search` | index.html · 查询检索（主打功能，Day 17 起） | 无 | `#search-input` | `#search-results` | `#search-summary` |
 | `source` | detail.html?id= · 信源比对 | 无 | `#source-search` | `#source-cards` | `#source-summary` |
 | `favs` | mine.html · 个人主页·我的收藏 | 无 | `#fav-search` | `#mine-fav-list` | `#fav-summary` |
 
 **Day 15 变更（2026-10-04）**：原 `feed` 组件（首页·热点卡片流）随导航重构并入 `board`，三态断言一条没删，只换了容器 id；`favs` 从首页视图迁到独立页 mine.html，并补上关键词筛选（保证断言强度不降）。
+
+**Day 17 变更（2026-10-05）**：登记 `search` 组件——查询检索页与筛选组件同构（有结果 / 无结果 / 清空恢复），基线条数是 0（未输入时结果区只显示引导，不预渲染卡片）；它的命中关键词带守卫，数据里查不到该词时脚本直接报错退出，不让「0 条 == 0 条」假通过。
 
 **新组件接入方式**：在 `filter-check.js` 的 `COMPS` 里加一条配置（选择器 + 基线条数 + 有/无结果用例），无需改内核。
 
@@ -86,6 +89,6 @@ node .workbuddy/skills/filter-check/filter-check.js favs
 
 ## 已知边界
 
-- 只覆盖「本地静态筛选」，不覆盖跨页搜索、后端检索。
+- 只覆盖「本地静态筛选与站内检索」（`search` 组件即是站内检索的 L1 部分），不覆盖后端检索（L3 自动联网 + AI 整合，待接后端）。
 - 用例取值依赖 demo 数据分布（假=1、存疑=4、真=0）；数据换了之后各组件配置里的用例要跟着换。
 - `board` 无计数元素、`favs`（v1）无条件筛选，属已知现状；清单里缺少的项会如实标记为 FAIL，不跳过。

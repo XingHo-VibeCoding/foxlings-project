@@ -13,7 +13,11 @@
    Day 16 变更记录（数据源扩充）：
      种子数据由 5 条 demo-* 换成 23 条 —— 凡「挑一条真实数据来验」的地方
      （详情页复制、浏览足迹、溢出巡检）一律改为从 data/data.json 现取，不再写死 id。
-     写死 id 的代价这次亲身踩到：数据一换，断言全卡在超时，看着像页面崩了。 */
+     写死 id 的代价这次亲身踩到：数据一换，断言全卡在超时，看着像页面崩了。
+
+   Day 17 变更记录（检索页骨架）：
+     新增 S 组三条断言，卡住检索页的两件核心交付物（站外兜底入口、L2 查证四步）
+     以及「未做的能力必须标注开发中」这条诚实性底线。 */
 const fs = require('fs');
 const PW = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
@@ -332,6 +336,19 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   R['N7_四种状态都能出现'] = stLoading && stEmpty && stError && stNormal;
   R['N8_错误态给出重试出口'] = stRetry;
   O['N7_四态明细'] = JSON.stringify({ loading: stLoading, empty: stEmpty, error: stError, normal: stNormal });
+
+  /* ---- S 组：检索页骨架的两个核心交付物（Day 17 新增） ----
+     这两样是「查询检索」作为主打功能的立身之本，缺了页面就只剩一个空壳：
+       ① 站内没命中时必须给站外兜底入口（不能只回一句「没找到」让人走投无路）；
+       ② L2 查证四步清单常显（这才是「证据整理员」定位最实在的抓手）。
+     另断一条：还没做的 L3 能力必须有「开发中」标注，不许假装已有。 */
+  await page.goto(BASE + '/#/search', { waitUntil: 'networkidle' });
+  await page.waitForSelector('#search-input');
+  await page.fill('#search-input', 'zzz绝不存在zzz');
+  await page.waitForTimeout(400);
+  R['S1_检索无命中给站外兜底'] = (await page.locator('#search-results .jump-btn[target="_blank"]').count()) >= 3;
+  R['S2_查证清单四步齐备'] = (await page.locator('.guide-steps li').count()) === 4;
+  R['S3_未做的能力有标注'] = (await page.locator('#view-search .soon').count()) === 1;
 
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });
