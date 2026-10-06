@@ -22,7 +22,7 @@ agent_created: true
 |---|---|---|---|---|---|
 | `board` | index.html · 辟谣榜（默认视图，原「热点卡片流」已并入） | `#verdict-filter` | `#board-search` | `#board-list` | `#filter-summary` |
 | `search` | index.html · 查询检索（主打功能，Day 17 起） | 无 | `#search-input` | `#search-results` | `#search-summary` |
-| `forum` | index.html · 论坛（F3 骨架，Day 19 起） | `#forum-cats` | `#forum-search` | `#forum-list` | `#forum-summary` |
+| `forum` | index.html · 论坛（Day 19 骨架，Day 21 起数据来自云库） | `#forum-cats` | `#forum-search` | `#forum-list` | `#forum-summary` |
 | `source` | detail.html?id= · 信源比对 | 无 | `#source-search` | `#source-cards` | `#source-summary` |
 | `favs` | mine.html · 个人主页·我的收藏 | 无 | `#fav-search` | `#mine-fav-list` | `#fav-summary` |
 
@@ -37,6 +37,10 @@ agent_created: true
 待审帖不进公开列表，内核的零条目断言因此同时验了「审核过滤」生效）；关键词「养老金」带守卫，
 数据里查不到就直接报错退出。**内核新增可配置项 `tagSel`**（默认 `.tag`）：论坛的分类标签类名是
 `.post-cat` 而不是结论标签 —— 只把选择器变成可配置，断言强度一条不减。
+
+**Day 21 变更（2026-10-06）**：论坛数据源从本地文件换成云库，基线口径不变——云库种子就是
+从 `data/posts.json` 灌进去的，「approved 条数」两边一致，断言照旧成立；「待审帖不得出现在列表」
+这条在云端形态下由数据库策略保证，断言的含金量从「前端过滤对了」升级成「服务端真的没给」。
 
 **新组件接入方式**：在 `filter-check.js` 的 `COMPS` 里加一条配置（选择器 + 基线条数 + 有/无结果用例），无需改内核。
 

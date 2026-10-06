@@ -7,10 +7,14 @@
 -- 方言：PostgreSQL 15+（JSONB 支持好）。若目标库是 MySQL 8：
 --       JSONB → JSON、SMALLINT 原样、TIMESTAMPTZ → DATETIME、BIGSERIAL → BIGINT AUTO_INCREMENT。
 --
--- 当前状态：**未执行**。前端仍读 data/data.json（纯静态）。
---           执行时机 = 接后端的那一刻，届时本文件与 db/json-to-sql.js 一起跑。
---           纪律（api-contract.md 第三节）：data.json 与数据库只许一处为准，
---           禁止双写过渡期超过一天 —— 所以「建表」与「切数据源」必须同一天完成。
+-- 当前状态（Day 21）：三张表都已在托管后端的云库**建好并灌入种子**。
+--           items 23 条（md5 双端指纹校验逐字一致）；posts 7 条（6 approved + 1 pending 样例）。
+--           前端已全部切到云库（js/api.js），data/*.json 降级为种子源头（db/*-to-sql.js 的输入）。
+--           执行通道：托管后端的 exec_sql（**一次只收一条语句**），种子由 --single 模式生成。
+--           本文件仍是表结构 + RLS 闸门的**权威文档**（实际策略以 api-contract.md 第五节为准）。
+--           ⚠️ 平台事实：未登录时 auth.uid() 返回字符串 'anon'（不是 NULL）——
+--           涉权限的策略必须写 TO authenticated，见 api-contract.md 第四节。
+--           pg_trgm 扩展未启用（托管环境未装扩展），站内检索先用 ILIKE 兜底（数据量小，够用）。
 --
 -- 生成种子数据：
 --   node db/json-to-sql.js > db/seed.sql     # 由 data/data.json 生成 INSERT
@@ -61,44 +65,53 @@ CREATE INDEX idx_items_title_trgm   ON items USING gin (title   gin_trgm_ops);
 CREATE INDEX idx_items_summary_trgm ON items USING gin (summary gin_trgm_ops);
 
 -- ---------------------------------------------------------------------------
--- ② posts — 论坛帖子（F3 预留，**当前未启用**）
---   上线前提：用户账号（由托管认证体系提供，故此处只存 author_id 不建 users 表）
---             + 人工审核流（法规要求，自动过滤不够）。
+-- ② posts — 论坛帖子（Day 21 已启用）
+--   author_id 由服务端 auth.uid() 填，客户端不许传（RLS 拒伪造）；未登录时为 'anon'，
+--   但插入策略限定 TO authenticated，所以未登录者实际插不进 —— 发帖必须登录。
+--   status 的状态机只能由站方管理通道推进（无 UPDATE 策略）：客户端想直接插 approved 会被拒。
+--   author_name 是展示昵称（发帖时用户自己填），永不参与权限判断。
 -- ---------------------------------------------------------------------------
 CREATE TABLE posts (
-  id          BIGSERIAL   PRIMARY KEY,
-  title       TEXT        NOT NULL,
-  body        TEXT        NOT NULL,
-  author_id   UUID        NOT NULL,                     -- 由托管用户认证体系提供
+  id          BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  category    TEXT        NOT NULL DEFAULT '求助溯源'   -- 三选一，与前端 POST_CATS 同步
+              CHECK (category IN ('求助溯源', '已解决', '经验讨论')),
+  title       TEXT        NOT NULL CHECK (char_length(title) BETWEEN 4 AND 60),
+  body        TEXT        NOT NULL CHECK (char_length(body) BETWEEN 10 AND 1000),
+  author_id   TEXT        NOT NULL DEFAULT auth.uid(),  -- 权限字段，客户端永不传
+  author_name TEXT        NOT NULL CHECK (char_length(author_name) BETWEEN 1 AND 20),
   item_id     TEXT        REFERENCES items(id) ON DELETE SET NULL,  -- 可选：关联到某条核查
   status      TEXT        NOT NULL DEFAULT 'pending'    -- 审核状态机
               CHECK (status IN ('pending', 'approved', 'rejected')),
   reject_note TEXT,                                     -- 驳回理由（回给作者）
+  replies     INTEGER     NOT NULL DEFAULT 0 CHECK (replies >= 0),  -- 展示预留，将来由回复表聚合
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE posts IS 'F3 论坛帖子；status 为 pending 时仅作者与审核人可见';
+COMMENT ON TABLE posts IS 'F3 论坛帖子：公开列表只出 approved；pending 仅作者与审核人可见。发帖必须登录（插入策略 TO authenticated）';
 
 CREATE INDEX idx_posts_feed ON posts (status, created_at DESC);
 CREATE INDEX idx_posts_item ON posts (item_id) WHERE item_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
--- ③ reports — 用户提交的线索（**当前未启用**，现在走 localStorage 的 fx_myreports）
---   这是「证据整理员」定位的输入端：用户看到可疑消息 → 提交 → 站方核查 → 成稿为 items。
+-- ③ reports — 用户提交的线索（Day 21 已启用）
+--   允许未登录提交：author_id 落 'anon'（平台对未登录的固定标识）。
+--   读策略只给 authenticated 的「自己的行」—— 匿名线索对客户端不可见，
+--   否则任何访客都能把所有人匿名提交的线索读走（它们全是 'anon'）。
+--   上线前需补：匿名提交的频控/人机验证（RLS 只管「谁」，不管「多快」）。
 -- ---------------------------------------------------------------------------
 CREATE TABLE reports (
-  id         BIGSERIAL   PRIMARY KEY,
-  text       TEXT        NOT NULL,                      -- 用户描述的线索内容
+  id         BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  text       TEXT        NOT NULL CHECK (char_length(text) BETWEEN 5 AND 500),
   url        TEXT,                                      -- 可选：原始链接
-  author_id  UUID,                                      -- 允许匿名提交，故可为 NULL
+  author_id  TEXT        DEFAULT auth.uid(),            -- 未登录落 'anon'；伪造他人署名被 RLS 拒
   status     TEXT        NOT NULL DEFAULT 'pending'     -- 线索处理流程
              CHECK (status IN ('pending', 'checking', 'published', 'rejected')),
   item_id    TEXT        REFERENCES items(id) ON DELETE SET NULL,  -- 核查成稿后回填
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE reports IS '用户提交的待核查线索；published 后会回填 item_id 指向成稿';
+COMMENT ON TABLE reports IS '用户提交的待核查线索：未登录可提交（author_id 落 anon）；客户端只能回读登录后自己提交的';
 
 CREATE INDEX idx_reports_queue ON reports (status, created_at);
 
@@ -113,8 +126,11 @@ COMMIT;
 --   GET  /api/items/:id      → SELECT * FROM items WHERE id = $1
 --   POST /api/search         → L3：先走上面的 items 查询做站内命中，再走联网搜索 + AI 整合
 --   GET  /api/posts          → SELECT * FROM posts WHERE status = 'approved' ORDER BY created_at DESC
---   POST /api/posts          → INSERT INTO posts (..., status) VALUES (..., 'pending')  -- 一律先待审
---   POST /api/reports        → INSERT INTO reports (text, url, author_id) VALUES (...)
+--                              （RLS 的 posts_read 完成过滤；登录者额外看得到自己的 pending）
+--   POST /api/posts          → INSERT INTO posts (category, title, body, author_name, item_id)
+--                              —— author_id / status 不许传，RLS 强制「本人 + pending」
+--   POST /api/reports        → INSERT INTO reports (text, url)，不带 RETURNING（匿名无读权限）
+--   GET  /api/reports        → SELECT * FROM reports（RLS 的 reports_read_own 只给登录者自己的行）
 --
 -- 错误返回统一 { "error": { "code": "...", "message": "..." } }，前端按四态规范处理。
 -- ============================================================================

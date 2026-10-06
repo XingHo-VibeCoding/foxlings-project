@@ -51,6 +51,9 @@
   --c-stat-bg: #f2f4fb;      /* 数据徽卡底 */
   --c-avatar-bg: #eef1ff;    /* 头像底（未用主色时） */
 
+  /* ---- Day 21 登录面板新增 ---- */
+  --c-mask: rgba(30, 40, 80, .45); /* 弹层遮罩底 */
+
   --radius: 12px;
   --shadow: 0 2px 6px rgba(30, 40, 80, .08);
   --shadow-hover: 0 10px 24px rgba(30, 40, 80, .16);
@@ -388,23 +391,35 @@ body {
 .trace-tip b { color: var(--c-text); }
 .trace-tip a { color: var(--c-primary); }
 
-/* ---------- 论坛（F3 骨架先行 · Day 19） ---------- */
-/* 发帖区：后端接通前只能暂存本机，故做成「说明在前、动作在后」的低调形态 */
+/* ---------- 论坛（F3） ---------- */
+/* 发帖区：Day 21 起需登录 —— 未登录只给登录出口，登录后才是真表单 */
 .forum-compose {
   background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
   padding: 16px 18px; margin-bottom: 16px;
 }
-.compose-title { font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-.compose-title .soon {
-  font-size: 12px; font-weight: normal; padding: 3px 10px; border-radius: 12px;
-  background: var(--c-doubt-soft); color: var(--c-doubt-deep);
-}
+.compose-title { font-size: 16px; margin-bottom: 10px; }
 .compose-label { display: block; font-size: 13px; color: var(--c-muted); margin-bottom: 8px; }
 .forum-compose .rep-input { margin: 0 0 10px; }
 .compose-note { font-size: 12px; color: var(--c-muted); margin-top: 10px; }
 .compose-note a { color: var(--c-primary); }
 .compose-note.note-ok { color: var(--c-true-deep); }
 .compose-note.note-warn { color: var(--c-fake-deep); }
+
+/* 未登录态：说明 + 一个登录出口 */
+.compose-guest-text { font-size: 13px; color: var(--c-muted); margin-bottom: 12px; }
+
+/* 已登录态：账号提示 + 两列表单 */
+.compose-who { font-size: 12px; color: var(--c-muted); margin-bottom: 12px; }
+.compose-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 560px) { .compose-grid { grid-template-columns: 1fr; } }
+
+.compose-input {
+  width: 100%; border: 1px solid var(--c-input-border); border-radius: 10px;
+  padding: 12px; font-size: 13px; font-family: inherit; outline: none;
+  background: var(--c-card); color: var(--c-text);
+  margin-bottom: 12px; transition: box-shadow .3s, border-color .3s;
+}
+.compose-input:focus { box-shadow: 0 0 0 3px rgba(59, 91, 253, .15); border-color: var(--c-primary); }
 
 /* 工具栏：分类 chip 与关键词框一行，窄屏自动换行 */
 .forum-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
@@ -432,6 +447,18 @@ body {
 .post-title { font-size: 16px; margin: 8px 0; }
 .post-body { font-size: 13px; color: var(--c-summary); margin-bottom: 8px; }
 .post-meta { font-size: 12px; color: var(--c-muted); }
+
+/* 待审帖（只有作者本人看得到）：主色描边 + 小标签。
+   刻意不复用结论四色 —— 「审核中」是流程状态，不是核查结论。 */
+.post-card.post-pending { border-left-color: var(--c-primary); }
+.post-review {
+  display: inline-block; font-size: 12px; padding: 4px 10px; border-radius: 12px;
+  background: var(--c-hover-bg); color: var(--c-primary-dark);   /* 实测 6.18:1 */
+}
+.post-pending-note {
+  font-size: 12px; color: var(--c-muted);
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--c-line-soft);
+}
 .post-rel { font-size: 13px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--c-line-soft); }
 .post-rel a { color: var(--c-primary); }
 
@@ -491,6 +518,82 @@ body {
   flex-shrink: 0; transition: background .25s, color .25s, border-color .25s;
 }
 .rep-del:hover { background: var(--c-fake-soft); color: var(--c-fake-deep); border-color: var(--c-fake); }
+
+/* ---------- 登录面板（DOM 由 auth.js 生成，样式只在这里定义一处） ----------
+   三个页面共用同一个面板：弹层挂在 body 上，不进任何页面的正文结构。 */
+.auth-mask {
+  position: fixed; inset: 0; z-index: 50;
+  background: var(--c-mask);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.auth-mask[hidden] { display: none; }
+
+.auth-panel {
+  position: relative; width: 100%; max-width: 400px;
+  max-height: calc(100vh - 32px); overflow-y: auto;
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow-hover);
+  padding: 22px 20px 18px; animation: popIn .3s both;
+}
+.auth-close {
+  position: absolute; top: 8px; right: 8px; width: 44px; height: 44px;
+  border: none; border-radius: 50%; background: transparent;
+  color: var(--c-muted); font-size: 20px; line-height: 1; cursor: pointer;
+  transition: background .25s, color .25s;
+}
+.auth-close:hover { background: var(--c-hover-bg); color: var(--c-text); }
+
+.auth-title { font-size: 18px; margin-bottom: 4px; }
+.auth-sub { font-size: 13px; color: var(--c-muted); margin-bottom: 14px; }
+
+.auth-modes { display: flex; gap: 6px; margin-bottom: 14px; }
+.auth-modes[hidden] { display: none; }
+
+.auth-label { display: block; font-size: 13px; color: var(--c-muted); margin-bottom: 6px; }
+.auth-input {
+  width: 100%; border: 1px solid var(--c-input-border); border-radius: 10px;
+  padding: 12px; font-size: 14px; font-family: inherit; outline: none;
+  background: var(--c-card); color: var(--c-text); transition: box-shadow .3s, border-color .3s;
+}
+.auth-input:focus { box-shadow: 0 0 0 3px rgba(59, 91, 253, .15); border-color: var(--c-primary); }
+
+#auth-pwd-row { margin-top: 12px; }
+.auth-code-row { display: flex; gap: 8px; align-items: stretch; margin-top: 12px; }
+.auth-code-row[hidden] { display: none; }
+.auth-code-row .auth-input { flex: 1; min-width: 0; }
+
+.auth-btn-ghost {
+  flex-shrink: 0; min-height: 44px; padding: 0 14px;
+  border: 1px solid var(--c-chip-border); border-radius: 10px;
+  background: var(--c-card); color: var(--c-text); font-size: 13px; cursor: pointer;
+  transition: background .25s, border-color .25s, color .25s;
+}
+.auth-btn-ghost:hover:not(:disabled) { background: var(--c-hover-bg); border-color: var(--c-primary); color: var(--c-primary); }
+.auth-btn-ghost:disabled { color: var(--c-muted); cursor: default; }
+
+.auth-btn {
+  width: 100%; min-height: 44px; margin-top: 14px;
+  border: none; border-radius: 10px; background: var(--c-primary); color: var(--c-white);
+  font-size: 14px; cursor: pointer; transition: background .25s;
+}
+.auth-btn:hover:not(:disabled) { background: var(--c-primary-dark); }
+.auth-btn:disabled { background: var(--c-chip-bg); color: var(--c-chip-text); cursor: default; }
+
+.auth-note { font-size: 12px; color: var(--c-muted); margin-top: 10px; min-height: 18px; }
+.auth-note.note-ok { color: var(--c-true-deep); }
+.auth-note.note-warn { color: var(--c-fake-deep); }
+
+.auth-alt { text-align: center; margin-top: 8px; }
+.auth-link {
+  border: none; background: transparent; color: var(--c-primary);
+  font-size: 13px; cursor: pointer; padding: 8px; min-height: 44px;
+}
+.auth-link:hover { text-decoration: underline; }
+
+.auth-foot {
+  font-size: 12px; color: var(--c-muted); margin-top: 8px; padding-top: 10px;
+  border-top: 1px solid var(--c-line-soft);
+}
 
 /* ---------- 页脚 ---------- */
 .site-footer {

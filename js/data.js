@@ -9,19 +9,21 @@ const VERDICTS = ["真", "假", "存疑", "部分属实"];
 /**
  * 加载并校验数据。返回 Promise<Array>（只含通过校验的条目）。
  * 全部失败时 reject，由调用方显示重试界面。
+ *
+ * Day 20：数据来源从「直接 fetch data.json」改为走接口层 api.getItems() ——
+ * 本函数不再关心数据存在哪（云数据库 or 本地文件），那是 api.js 的事。
+ * 校验逻辑原样保留：后台录错的数据同样要被挡在页面之外。
  */
 async function loadVerifiedData() {
-  let raw;
+  let rawItems;
   try {
-    const resp = await fetch("data/data.json");
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    raw = await resp.json();
+    rawItems = await api.getItems();
   } catch (err) {
     console.error("[data] 数据加载失败：", err);
     throw err; // 调用方显示重试按钮
   }
 
-  const items = Array.isArray(raw.items) ? raw.items : [];
+  const items = Array.isArray(rawItems) ? rawItems : [];
   const good = [];
 
   items.forEach((item, i) => {

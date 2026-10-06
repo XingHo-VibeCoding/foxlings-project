@@ -4,8 +4,13 @@
    零依赖，用 Node 直接跑。
 
    用法：
-     node db/json-to-sql.js > db/seed.sql     # 生成
-     psql -d foxlings -f db/seed.sql          # 灌库
+     node db/json-to-sql.js > db/seed.sql     # 完整事务脚本（psql -f 灌库）
+     psql -d foxlings -f db/seed.sql
+     node db/json-to-sql.js --single          # 单条 INSERT（托管后端 exec_sql 用）
+
+   Day 20 变更（接托管后端）：执行通道从 psql 换成 exec_sql，而它**一次只收一条语句**，
+   原来的 BEGIN/TRUNCATE/COMMIT 多语句脚本用不上。所以加 --single：只吐一条 INSERT，
+   可直接贴进 exec_sql（语句含中文，传参时用 base64 更稳）。
 
    为什么要有它：data.json 是当前**唯一**的数据源，将来建表时不该人工抄一遍。
    这个脚本保证「表里的数据」和「前端看到的数据」永远是同一份（api-contract.md
@@ -54,6 +59,25 @@ function main() {
     else good.push(it);
   });
 
+  const rows = good.map((it) => {
+    const cc = CROSS_CHECKS.includes(it.cross_check) ? q(it.cross_check) : "NULL";
+    return "  (" +
+      [q(it.id), q(it.title), q(it.verdict), q(it.summary), jb(it.sources),
+       q(it.origin), q(it.first_seen), q(it.updated_at), n(it.heat),
+       it.heat_note ? q(it.heat_note) : "NULL", cc].join(", ") +
+      ")";
+  });
+  const insert = "INSERT INTO items (id, title, verdict, summary, sources, origin, first_seen, updated_at, heat, heat_note, cross_check) VALUES\n" +
+    rows.join(",\n") + ";";
+
+  // --single：只吐这一条 INSERT —— 托管后端的 exec_sql 一次只收一条语句
+  if (process.argv.includes("--single")) {
+    process.stdout.write(insert + "\n");
+    if (skipped.length) process.stderr.write("[warn] 已跳过：" + skipped.join("；") + "\n");
+    process.stderr.write("[ok] 生成单条 INSERT，" + good.length + " 条记录\n");
+    return;
+  }
+
   const out = [];
   out.push("-- 本文件由 db/json-to-sql.js 从 data/data.json 自动生成，请勿手工编辑。");
   out.push("-- 生成时间：" + new Date().toISOString());
@@ -64,17 +88,7 @@ function main() {
   out.push("-- 幂等重灌：种子数据可反复执行");
   out.push("TRUNCATE TABLE items CASCADE;");
   out.push("");
-  out.push("INSERT INTO items (id, title, verdict, summary, sources, origin, first_seen, updated_at, heat, heat_note, cross_check) VALUES");
-
-  const rows = good.map((it) => {
-    const cc = CROSS_CHECKS.includes(it.cross_check) ? q(it.cross_check) : "NULL";
-    return "  (" +
-      [q(it.id), q(it.title), q(it.verdict), q(it.summary), jb(it.sources),
-       q(it.origin), q(it.first_seen), q(it.updated_at), n(it.heat),
-       it.heat_note ? q(it.heat_note) : "NULL", cc].join(", ") +
-      ")";
-  });
-  out.push(rows.join(",\n") + ";");
+  out.push(insert);
   out.push("");
   out.push("COMMIT;");
   out.push("");

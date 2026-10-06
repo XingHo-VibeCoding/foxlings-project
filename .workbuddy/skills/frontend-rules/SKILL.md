@@ -32,6 +32,18 @@ agent_created: true
   从 search.js / mine.js / detail.js 各写一份，上移到三页都会加载的 `data.js`——
   论坛要往同一个键（`fx_myreports`）暂存线索，**同一份数据只能有一个定义**
 - **断言同步**：新增 **F 组 9 条**（论坛），硬门槛 74 → **83**；S2 的选择器收窄到 `#view-search`
+
+## Day 21 结构变更（2026-10-06，论坛接后端 · 发帖需登录 · 分层收口）
+
+- **论坛接通后端**：帖子读云库、发帖写云库（一律先进人工审核队列），发帖前必须登录。
+  「哪些帖子能被谁看到」由数据库策略决定，前端**不做 status 过滤**（再筛一次等于把安全逻辑放错地方）；
+  徽卡从「已通过/待审核」改为「已通过 (+ 登录后的「我的待审」)」——访客本来就看不到别人的待审帖。
+- **新增身份层 `js/auth.js`**：Web 端只有邮箱登录（验证码 / 密码 / 忘记密码），弹层 DOM 由它生成。
+  ⚠️ **邮箱登录只在发布域名上可用**（服务端按 Origin 校验），本地预览登不上——验证登录必须在线上做。
+- **分层收口成硬门槛**：新增 **A 组 2 条**——页面脚本不得出现
+  `cloud.database` / `.from("` / `WorkBuddyCloud` / `fetch(`，登录动作只许待在 auth.js（源码扫描）。
+- **断言同步**：F 组换 2 增 2（「标注开发中」→「未登录不给发帖表单」；「暂存写同一键」→「登录出口能开面板且四入口齐全」），
+  A 组新增 2 条，硬门槛 83 → **87**。
   （论坛也有 `.guide-steps`，不收窄会数成 8 步）
 - **修正本文件两处过期说法**：N1/N2 的视图名（Day 15 起是 `#/board` / `#/search` / `#/forum`，
   原 `#/feed` / `#/favs` 已废）、执行方式里已删除的 `filter3-check.js`
@@ -180,7 +192,7 @@ agent_created: true
 | N6 | **每个列表都必须能进入四种状态**：加载中（转圈 + 文字）/ 正常（渲染列表）/ 空（说明 + 出口按钮）/ 错误（原因 + 重试按钮）。数据层状态用统一状态机（`loading / ok / error`）+ 状态闸门 `stateGuard()`，禁止"加载失败还永远显示加载中" |
 | N7 | 三态渲染统一走 `renderListState(container, state, opts)`，外层类固定 `.empty-state` + `.state-xxx`，出口按钮固定 `.empty-jump`；错误态加 `role="alert"`，加载/空加 `role="status"` |
 | N8 | 空态文案必须与上下文区分（无数据 / 筛空 / 零收藏是三种不同的话），且**都必须有出口**，不留死胡同 |
-| N9 | 状态演示开关走地址栏 `?demo=loading|empty|error`（`data.js` 的 `readDemoState()` / `loadItemsForPage()`），仅用于本地演示与验收，接后端后整段删除；开启时页面顶部挂 `.demo-banner` 明确告知，避免被误认成真故障 |
+| N9 | 状态演示开关走地址栏 `?demo=loading|empty|error`（`data.js` 的 `readDemoState()` / `loadItemsForPage()`），仅用于本地演示与验收，**公开上线前整段剔除**；开启时页面顶部挂 `.demo-banner` 明确告知，避免被误认成真故障 |
 
 ## 六、修改前检查（动手之前必须做完这 5 条）
 
@@ -215,7 +227,7 @@ node .workbuddy/skills/frontend-rules/check-frontend.js
 node .workbuddy/skills/filter-check/filter-check.js
 ```
 
-脚本分九组：**L** 页面层级 / **C** 颜色与字体 / **B** 卡片与按钮 / **M** 移动端 / **N** 路由与四态 / **S** 检索页 / **F** 论坛 / **R** 回归底线 / **O** 观察项。
+脚本分十组：**L** 页面层级 / **C** 颜色与字体 / **B** 卡片与按钮 / **M** 移动端 / **N** 路由与四态 / **S** 检索页 / **F** 论坛 / **A** 架构分层 / **R** 回归底线 / **O** 观察项。
 
 > `filter3-check.js` 已于 Day 16 删除（还写着 Day 12 的旧结构 `#feed-search`，无任何引用）；
 > 列表筛选检查统一由 `.workbuddy/skills/filter-check` 承担。
@@ -244,6 +256,7 @@ node .workbuddy/skills/filter-check/filter-check.js
 - 字体渲染、亚像素对齐等视觉细节脚本测不了，仍需人工看一眼截图。
 - **hash 路由的地址带 `#`**（`index.html#/board`），不是 `/board` 这种干净路径。这是纯静态托管（GitHub Pages 无重写规则）下的自觉取舍——用 History API 需要 404 回退方案，列入下一步计划，不阻塞当前阶段。
 - `?demo=` 演示开关是**临时装置**，上线前必须删（或用构建流程剔除），否则用户能手动把页面强制成错误态。
+- **登录、发帖、账号区只能在线上验证**：托管后端的邮箱登录按 Origin 校验，只在发布域名可用（本地预览登不上）。本地能验的是「未登录时的门槛立不立得住」与「面板入口齐不齐」。
 
 ## 已知技术债（记录在案，未擅自修改）
 

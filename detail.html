@@ -58,6 +58,11 @@
     </div>
   </footer>
 
+  <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式） -->
+  <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+  <!-- 公开配置 → 数据接口层 → 页面数据层，顺序不能换（后者依赖前者） -->
+  <script src="js/cloud-config.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/data.js"></script>
   <script src="js/detail.js"></script>
 </body>

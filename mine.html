@@ -29,9 +29,15 @@
     <div class="view-head">
       <div>
         <h2 class="view-title">我的主页</h2>
-        <p class="view-sub">收藏、足迹和线索都只存在这台设备上，不上传任何数据</p>
+        <p class="view-sub">收藏与足迹只存在这台设备上；线索和帖子存云端，换个设备也找得到</p>
       </div>
     </div>
+
+    <!-- ⓪ 账号（Day 21：发帖与线索需要一个身份；身份层见 js/auth.js） -->
+    <section class="mine-card" id="account">
+      <h2>账号</h2>
+      <div id="account-body"></div>
+    </section>
 
     <!-- ① 我的收藏（读详情页收藏的记录，键：fx_favs） -->
     <section class="mine-card">
@@ -48,14 +54,15 @@
       <div id="hist-list" class="mine-list"></div>
     </section>
 
-    <!-- ③ 我提交的待核查（本地暂存；论坛开通后可一键发布） -->
+    <!-- ③ 我提交的待核查（Day 21 起写云库；未登录时只在本机留底） -->
     <section class="mine-card">
       <h2>我提交的待核查 <span class="mine-count" id="rep-count"></span></h2>
-      <p class="mine-about">看到查不到出处的消息？先记在这里——只存在本机，论坛开通后可一键发布给大家一起溯源。</p>
+      <p class="mine-about" id="rep-hint"></p>
       <textarea id="rep-input" class="rep-input" rows="2"
                 placeholder="一句话描述你看到的说法 + 在哪看到的（如：某微信群说……）"
-                aria-label="记录一条待核查线索"></textarea>
-      <button type="button" class="empty-jump" id="rep-add">记下这条线索</button>
+                aria-label="提交一条待核查线索"></textarea>
+      <button type="button" class="empty-jump" id="rep-add">提交线索</button>
+      <p class="compose-note" id="rep-note" role="status"></p>
       <div id="rep-list" class="mine-list"></div>
     </section>
 
@@ -81,7 +88,13 @@
     </div>
   </footer>
 
+  <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式） -->
+  <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+  <!-- 公开配置 → 数据接口层 → 页面数据层 → 身份层，顺序不能换（后者依赖前者） -->
+  <script src="js/cloud-config.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/data.js"></script>
+  <script src="js/auth.js"></script>
   <script src="js/mine.js"></script>
 </body>
 </html>

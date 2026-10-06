@@ -131,11 +131,13 @@
       </section>
     </section>
 
-    <!-- 视图三：论坛（F3 骨架先行 · Day 19）
+    <!-- 视图三：论坛（F3）
          论坛的位置：把「工具查不到」的消息拿到人堆里一起溯源——
          已删的短视频、私密群聊里的截图，正是自动化工具够不着、最需要人工补位的地方。
-         本期做到哪：界面骨架 + 样例帖子（data/posts.json，全部标注【示例】）+ 发帖暂存本机；
-         账号、发帖发布、回复与人工审核需要后端，接入后点亮（见 api-contract.md 的 /api/posts）。
+         Day 19 建界面骨架；Day 21 接后端：帖子读云库、发帖写云库（一律先进人工审核队列），
+         发帖需登录（身份层见 js/auth.js）。
+         「哪些帖子能被谁看到」由数据库策略决定，不是前端筛出来的：
+         访客只拿得到 approved，作者本人额外看得到自己那条 pending。
          社区规则与审核说明必须常显：用户内容必须有人管审核，是上线前的硬性前提。 -->
     <section id="view-forum" class="view" role="tabpanel" aria-labelledby="tab-forum" tabindex="0" aria-label="论坛">
       <div class="view-head">
@@ -147,21 +149,54 @@
         <div class="stat-row" id="forum-stats"></div>
       </div>
 
-      <!-- 发帖区：后端接通前只能暂存本机（与个人主页「我提交的待核查」共用一份数据） -->
+      <!-- 发帖区：需登录（身份见 js/auth.js）；提交后一律先进人工审核队列 -->
       <section class="forum-compose" aria-labelledby="compose-title">
-        <h3 class="compose-title" id="compose-title">
-          发一条求助 <span class="soon">开发中</span>
-        </h3>
-        <label class="compose-label" for="forum-input">
-          你在哪看到这条消息的（群聊 / 短视频 / 朋友圈）？原文怎么说的？
-        </label>
-        <textarea id="forum-input" class="rep-input" rows="3"
-                  placeholder="例：家族群里说「下周起养老金改按新标准发放」，配了一张没有出处的截图……"
-                  aria-label="描述你要求助溯源的消息"></textarea>
-        <button type="button" class="empty-jump" id="forum-submit">暂存到本机</button>
-        <p class="compose-note" id="forum-submit-note" role="status">
-          发帖、回复与人工审核需要账号与后端支持。现在点按钮只存在你自己的浏览器里（<a href="mine.html">个人主页</a>最下方能看到），不会公开显示。
-        </p>
+        <h3 class="compose-title" id="compose-title">发一条求助</h3>
+
+        <!-- 未登录：只给一个登录出口，不给能提交的表单 -->
+        <div id="compose-guest">
+          <p class="compose-guest-text">
+            发帖需要一个身份——帖子得有人负责。用邮箱收一个验证码就能登录，不用注册流程；
+            本站不收集手机号，邮箱也不会显示给别人。
+          </p>
+          <button type="button" class="empty-jump" id="compose-signin">登录后发帖</button>
+        </div>
+
+        <!-- 已登录：发帖表单（字段与云库 posts 表一致，前端先校验一遍图个早提示） -->
+        <form id="compose-form" hidden>
+          <p class="compose-who" id="compose-who"></p>
+
+          <div class="compose-grid">
+            <div>
+              <label class="compose-label" for="compose-name">怎么称呼你</label>
+              <input type="text" id="compose-name" class="compose-input" maxlength="20"
+                     placeholder="会显示在帖子上，如「夜航船」">
+            </div>
+            <div>
+              <label class="compose-label" for="compose-cat">分类</label>
+              <select id="compose-cat" class="compose-input">
+                <option value="求助溯源">求助溯源</option>
+                <option value="已解决">已解决</option>
+                <option value="经验讨论">经验讨论</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="compose-label" for="compose-title">标题</label>
+          <input type="text" id="compose-title" class="compose-input" maxlength="60"
+                 placeholder="一句话说清你要问什么，如「群里在传 XX，配图没有出处」">
+
+          <label class="compose-label" for="compose-body">
+            你在哪看到的（群聊 / 短视频 / 朋友圈）？原文怎么说的？
+          </label>
+          <textarea id="compose-body" class="rep-input" rows="4" maxlength="1000"
+                    placeholder="例：家族群里说「下周起养老金改按新标准发放」，配了一张没有出处的截图……"></textarea>
+
+          <button type="submit" class="empty-jump" id="compose-submit">提交审核</button>
+          <p class="compose-note" id="compose-note" role="status">
+            帖子会先进人工审核队列，通过后才对所有人可见（社区规则见下方）。
+          </p>
+        </form>
       </section>
 
       <!-- 筛选：分类 + 关键词（与全站列表同一套交互范式，两者叠加生效） -->
@@ -179,9 +214,9 @@
       <p class="filter-summary" id="forum-summary" aria-live="polite">正在加载帖子…</p>
       <div id="forum-list" class="post-list"></div>
 
-      <!-- 样例帖说明：演示数据必须说明白，不能让人误以为是真实网友发言 -->
+      <!-- 样例帖说明：库里现在只有站方录入的种子帖，必须说明白 -->
       <p class="forum-sample-note">
-        上面是<b>结构演示用的样例帖子</b>，不是真实用户发言——论坛开通后这里会换成大家真实发布的帖子。
+        目前列表里是<b>站方录入的样例帖</b>（种子数据），不是真实用户发言。大家开始发帖后这里会混上真实帖子——真实帖子一律先过人工审核才显示。
       </p>
 
       <!-- 社区规则与审核说明（法规要求：用户生成内容必须有人管审核，自动过滤不够） -->
@@ -211,7 +246,13 @@
     </div>
   </footer>
 
+  <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式） -->
+  <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+  <!-- 公开配置 → 数据接口层 → 页面数据层 → 身份层，顺序不能换（后者依赖前者） -->
+  <script src="js/cloud-config.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/data.js"></script>
+  <script src="js/auth.js"></script>
   <script src="js/home.js"></script>
   <script src="js/search.js"></script>
   <script src="js/forum.js"></script>

@@ -33,7 +33,24 @@
      新增 F 组 9 条：占位已换真骨架、**未过审帖子不得进公开列表**（审核机制）、
      分类筛选生效、无命中给清空出口且能恢复、发帖区标注开发中、审核规则已写明、
      样例帖已标明、发帖暂存写进与个人主页同一个键、论坛按钮触控达标。
-     硬门槛总数 74 → 83。 */
+     硬门槛总数 74 → 83。
+
+   Day 21 变更记录（论坛接后端 · 发帖需登录）：
+     帖子改从云库读、发帖写云库（先进审核队列），发帖前必须先登录。
+     F 组两条随语义更换（**不是删掉**）：
+       · 「发帖区标注开发中」→「未登录时不给发帖表单」——能力接通了，诚实性底线的
+         标的从"标注开发中"变成"别假装能发"；
+       · 「发帖暂存写同一键」→「登录出口能开面板且入口齐全」——链条从本机暂存
+         升级成真发布，要盯的就变成登录面板四个入口（邮箱/验证码/密码/忘记密码）
+         一个都不能少，少一个就有用户进不来。
+     新增两条平台约束：只提供邮箱登录（手机号、微信是小程序端的，Web 上做了也是假的）、
+     登录面板的按钮同样要 ≥44px（面板挂在 body 上，B5/F9 都扫不到它）。
+
+   Day 21 板块三变更记录（分层收口）：
+     新增 A 组 2 条，把「分层」从口头约定变成硬门槛：页面脚本（data/home/search/
+     forum/mine/detail）不得出现 cloud.database / .from( / WorkBuddyCloud / fetch(，
+     登录动作只许待在 auth.js —— 源码扫描，改哪层就在哪层。
+     硬门槛总数 85 → 87（F 组换 2 增 2，A 组新增 2）。 */
 const fs = require('fs');
 const PW = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
 
@@ -465,8 +482,10 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     return zero && text && hasExit && back;
   })();
 
-  // 诚实底线：发帖能力未接通，必须标注开发中；样例帖必须标明是样例
-  R['F5_发帖区标注开发中'] = (await page.locator('#view-forum .soon').count()) >= 1;
+  // Day 21：发帖已接通后端（需登录），所以这条从「标注开发中」改成「门槛立得住」——
+  // 未登录只给登录出口，不给能提交的表单（发了也发不出去，界面不该假装可以）
+  R['F5_未登录时不给发帖表单'] = (await page.locator('#compose-guest').isVisible()) &&
+    !(await page.locator('#compose-form').isVisible());
   R['F6_样例帖已标明'] = (await page.locator('#view-forum .forum-sample-note').textContent())
     .indexOf('样例') !== -1;
 
@@ -476,16 +495,23 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     return txt.indexOf('审核') !== -1 && (await page.locator('#view-forum .guide-steps li').count()) === 4;
   })();
 
-  // 发帖暂存必须写进与个人主页同一把键（fx_myreports），否则两处数据会分叉
-  R['F8_发帖暂存写同一键'] = await (async () => {
-    await page.evaluate(() => localStorage.removeItem('fx_myreports'));
-    await page.fill('#forum-input', '检查脚本：暂存链路测试（可删）');
-    await page.locator('#forum-submit').click();
-    await page.waitForTimeout(350);
-    return await page.evaluate(() => {
-      const v = JSON.parse(localStorage.getItem('fx_myreports') || '[]');
-      return Array.isArray(v) && v.length === 1 && !!v[0].text;
-    });
+  // Day 21：登录出口必须真的能打开登录面板（不能是个死按钮），且四种入口一个不少：
+  // 邮箱、验证码、密码登录、忘记密码 —— 少一个就等于某种用户进不来
+  R['F8_登录出口能开面板且入口齐全'] = await (async () => {
+    await page.locator('#compose-signin').click();
+    await page.waitForTimeout(400);
+    const open = await page.locator('#auth-mask').isVisible();
+    const parts = [
+      await page.locator('#auth-email').count(),
+      await page.locator('#auth-send').count(),
+      await page.locator('#auth-code').count(),
+      await page.locator('#auth-modes [data-auth-mode="pwd"]').count(),
+      await page.locator('#auth-forgot').count(),
+    ];
+    const full = parts.every((n) => n === 1);
+    await page.locator('#auth-close').click();
+    await page.waitForTimeout(300);
+    return open && full && !(await page.locator('#auth-mask').isVisible());
   })();
 
   // 论坛自己的按钮也要够大（B5 只扫得到当前可见视图里的按钮）
@@ -494,6 +520,46 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
       .filter((b) => b.offsetParent !== null)
       .map((b) => Math.round(b.getBoundingClientRect().height))
       .filter((h) => h < 44))).length === 0;
+
+  // Day 21：Web 应用只支持邮箱登录（手机号/微信只在小程序端有）——
+  // 界面上不许出现这些入口，免得用户点下去才发现这条路不存在
+  R['F10_只提供邮箱登录'] = await (async () => {
+    await page.locator('#compose-signin').click();
+    await page.waitForTimeout(300);
+    const txt = await page.locator('#auth-mask').textContent();
+    const bad = /短信登录|微信登录|手机号登录|手机号注册|扫码登录/.test(txt);
+    await page.locator('#auth-close').click();
+    await page.waitForTimeout(250);
+    return !bad;
+  })();
+
+  // 登录面板的按钮也要够大：面板挂在 body 上，B5/F9 都扫不到它
+  R['F11_面板按钮均≥44px'] = await (async () => {
+    await page.locator('#compose-signin').click();
+    await page.waitForTimeout(300);
+    const small = (await page.evaluate(() =>
+      [...document.querySelectorAll('#auth-mask button')]
+        .filter((b) => b.offsetParent !== null)
+        .map((b) => Math.round(b.getBoundingClientRect().height))
+        .filter((h) => h < 44))).length;
+    await page.locator('#auth-close').click();
+    await page.waitForTimeout(250);
+    return small === 0;
+  })();
+
+  /* ---- A 组：架构分层（Day 21 板块三收口） ----
+     「分层」在本项目的含义：页面只认 api.xxx() 与 auth.xxx()，
+     谁直接摸 SDK / 数据库 / 本地 json，谁就是在给下一次换数据源埋雷。
+     扫的是源码不是运行时 —— 运行时盯不住「哪一层写的这行代码」。 */
+  const PAGE_SCRIPTS = ['js/data.js', 'js/home.js', 'js/search.js', 'js/forum.js', 'js/mine.js', 'js/detail.js'];
+  const readSrc = (f) => { try { return fs.readFileSync(ROOT + '/' + f, 'utf8'); } catch (e) { return ''; } };
+
+  R['A1_页面不绕过接口层碰数据'] = PAGE_SCRIPTS.every((f) =>
+    !/cloud\.database|\.from\(["']|WorkBuddyCloud|fetch\(/.test(readSrc(f)));
+
+  // 身份动作同理：登录/发码/验证只许出现在 auth.js，页面只调 auth.xxx()
+  R['A2_身份动作只在身份层'] = PAGE_SCRIPTS.every((f) =>
+    !/sendOtp|verifyOtp|signInWithPassword|resetPasswordForEmail|onAuthStateChange/.test(readSrc(f)));
 
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });
