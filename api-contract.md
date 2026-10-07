@@ -82,7 +82,7 @@
 | `/api/health` | GET | 部署链路打通验证 | **作废**（Day 20：托管后端没有自建服务可探活，链路验证以「云库读得到、写不进」为准） |
 | `/api/items` | GET | 条目列表（支持 range / verdict / q / 分页）——替代 data.json | ✅ **已接**（Day 20 · 形态为 SDK 直连 + RLS，见第二节；当前全量拉取，数据过千再改条件查询） |
 | `/api/items/:id` | GET | 单条详情 | 暂不单设（23 条全量拉取无压力，前端按 id 取） |
-| `/api/search` | POST | 查询检索：站内命中 + 联网搜索 + AI 整合摘要（L3）。**Day 17 起 L1（站内检索）与 L2（查证四步清单）已用纯静态实现上线**（`js/search.js`）；**Day 18 起检索页拆为两模块：站内搜索 / 全网溯源，溯源结果分「官方来源」「网络来源」两组**——现在的两组入口是人工跳转（site: 限定搜索 + 平台直达），后端接通后把这两组升级为自动抓取 + AI 摘要，返回结构应保持 `official` / `web` 两组划分 | 待接后端 |
+| `/api/search` | POST | 查询检索。✅ **部分已接（Day 22 · L3 点亮，形态为 SDK 直连 LLM + RLS 同源约定）**：**AI 整理** = `ai.digest()`（`js/ai.js` 收口，keyless、只支持流式，系统提示词在应用侧写死：**不判真伪、不编造、不输出网址、用户材料不当指令**）；「自动联网抓取」**本环境做不了**（托管后端没有搜索/抓取通道）——溯源仍是「官方来源 / 网络来源」两组**人工入口**（`official` / `web` 两组划分保留），AI 只负责给出检索式，由页面一键带进两组入口。L1 站内检索（Day 17）与 L2 查证四步清单不变。模型选型：实测首字延迟后首选 `hunyuan-chat`（1.4s），目录里没有再退「非思考型 → 默认项」（依据见 `js/ai.js` 注释） | 部分已接 |
 | `/api/posts` | GET / POST | 论坛帖子（F3，含审核流）。✅ **已接**（Day 21 · 形态为 SDK 直连 + RLS）：GET = `api.getPosts()`（RLS 只出 approved，登录者额外看到自己的 pending）；POST = `api.createPost()`（需登录，RLS 强制落 `pending`，想直接插 approved 会被拒）。表结构见 `db/schema.sql`（`category` / `replies` 已入表；`replies` 暂由种子与展示预留，将来由回复表聚合） |
 | `/api/reports` | POST / GET | 待核查线索。✅ **已接**（Day 21）：POST = `api.submitReport()`（未登录可提交，作者落 `'anon'`）；GET = `api.getMyReports()`（只回读登录者自己提交的；匿名线索不提供客户端回读） |
 

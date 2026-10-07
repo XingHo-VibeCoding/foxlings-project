@@ -30,10 +30,26 @@
      · 内核加了一个可配置项 `tagSel`（默认 '.tag'）：论坛的分类标签类名是 .post-cat
        而不是结论标签 .tag —— 只把选择器变成可配置，断言强度不变。 */
 const fs = require('fs');
-const pw = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
+
+/* playwright-core 与 Edge 的定位（Day 22 修）
+   原写法把 node 运行时目录 + 版本号写死。当天环境换过运行时目录的版本号，
+   三个检查脚本一起失灵（报的却是「找不到模块」）—— 是脚本自己过期了，不是页面坏了。
+   改成候选顺序查找；Edge 的两种安装位置也一并兜底。 */
+function pickRequire(cands) {
+  for (const p of cands) { try { return require(p); } catch (e) { /* 试下一个 */ } }
+  return null;
+}
+const pw = pickRequire([
+  'C:/Users/狐灵/.workbuddy/binaries/node/workspace/node_modules/playwright-core',
+  'playwright-core',
+]);
+if (!pw) { console.error('脚本失败: 找不到 playwright-core（请在托管 node 工作区 npm install playwright-core）'); process.exit(1); }
 
 const BASE = 'http://localhost:8000';
-const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+const EDGE = [
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+].find((p) => fs.existsSync(p)) || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const NO_MATCH = 'zzz绝不存在zzz';
 const EMPTY_TEXT = '没有找到相关内容'; // 全站统一的无结果文案
 

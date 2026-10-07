@@ -50,13 +50,41 @@
      新增 A 组 2 条，把「分层」从口头约定变成硬门槛：页面脚本（data/home/search/
      forum/mine/detail）不得出现 cloud.database / .from( / WorkBuddyCloud / fetch(，
      登录动作只许待在 auth.js —— 源码扫描，改哪层就在哪层。
-     硬门槛总数 85 → 87（F 组换 2 增 2，A 组新增 2）。 */
+     硬门槛总数 85 → 87（F 组换 2 增 2，A 组新增 2）。
+
+   Day 22 变更记录（点亮 L3 · AI 溯源助手）：
+     L3 从「界面占位」变成真能力（把材料拆成「主张 / 常见套路 / 必查三件事 / 检索式」，
+     并给可点的检索式），于是两处语义随能力升级更换（同样是**换标的**，不是删断言）：
+       · S3「未做的能力标注开发中」→「能力边界标注不联网」——接通的是"整理"，
+         没接通的是"联网抓取"（托管后端只有 LLM、没有搜索通道），要标的正是后一条；
+       · A 组新增 3 条守 AI 的纪律：页面脚本不许自己调模型（只许 ai.js）、
+         调用必须走流式且 messages[0] 是 system、提示词里必须留着「不做真伪判决」
+         与「不许输出网址」两条底线 —— 第一条是产品定位，第二条是防编造。
+     新增 S 组 4 条盯 AI 区的界面纪律（引导态不留白、AI 生成标注在位、
+     输入过短不发模型请求、按钮触控达标）。
+     硬门槛总数 87 → 94。 */
 const fs = require('fs');
-const PW = require('C:/Users/狐灵/.workbuddy/binaries/node/versions/22.22.2-3/node_modules/playwright-core');
+
+/* playwright-core 与 Edge 的定位（Day 22 修）
+   原写法把 node 运行时目录 + 版本号写死。当天环境换过运行时目录的版本号，
+   三个检查脚本一起失灵（报的却是「找不到模块」）—— 是脚本自己过期了，不是页面坏了。
+   改成候选顺序查找；Edge 的两种安装位置也一并兜底。 */
+function pickRequire(cands) {
+  for (const p of cands) { try { return require(p); } catch (e) { /* 试下一个 */ } }
+  return null;
+}
+const PW = pickRequire([
+  'C:/Users/狐灵/.workbuddy/binaries/node/workspace/node_modules/playwright-core',
+  'playwright-core',
+]);
+if (!PW) { console.error('脚本失败: 找不到 playwright-core（请在托管 node 工作区 npm install playwright-core）'); process.exit(1); }
 
 const ROOT = 'D:/AI/foxlings-project';
 const BASE = 'http://localhost:8000';
-const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+const EDGE = [
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+].find((p) => fs.existsSync(p)) || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 
 /* 示例条目 id **不写死**，从 data.json 动态取。
    Day 16 教训：种子数据从 demo-005 换成 20261005-01 后，写死 id 的断言全部
@@ -181,6 +209,10 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   const browser = await PW.chromium.launch({ executablePath: EDGE, headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 790 } });
   const errors = [];
+  // Day 22：AI 调用是「真花钱」的请求，这里把请求记下来（只记不改），
+  // 供 S12 断言「输入过短时不该发模型请求」——空点也能烧应用方额度，必须挡住。
+  const requests = [];
+  page.on('request', (r) => requests.push(r.url()));
   page.on('pageerror', (e) => errors.push(String(e)));
 
   const overflowNow = () => page.evaluate(() =>
@@ -381,7 +413,7 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
      检索页拆成「站内搜索」+「全网溯源」两个模块，两者的立身之本各断一条：
        站内：没命中必须给出口（清空 + 指向全网溯源），不能只回一句「没找到」就让人走投无路；
        溯源：必须真的分成「官方来源」和「网络来源」两组入口，且入口带关键词直达。
-     另断：L2 查证四步清单常显、L3 未做能力必须有「开发中」标注（不许假装已有）、
+     另断：L2 查证四步清单常显、**能力边界必须有标注**（Day 22 起标的是「不联网」）、
      两模块互斥显示、溯源模块可深链（分享/刷新不丢模块）。 */
   await page.goto(BASE + '/#/search', { waitUntil: 'networkidle' });
   await page.waitForSelector('#search-input');
@@ -392,7 +424,14 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   R['S1_站内无命中给溯源出口'] = (await page.locator('#search-results .empty-jump').count()) >= 1 &&
     (await page.locator('#search-results #search-to-trace').count()) === 1;
   R['S2_查证清单四步齐备'] = (await page.locator('#view-search .guide-steps li').count()) === 4;
-  R['S3_未做的能力有标注'] = (await page.locator('#view-search .soon').count()) === 1;
+
+  /* S3 能力边界标注（Day 17 立，Day 22 换标的）
+     Day 17~21：L3 没做，标「开发中」，不许假装已有。
+     Day 22：L3 的点亮只点亮了「整理」这半边——「联网抓取」在本环境做不了
+     （托管后端只有 LLM、没有搜索通道）。所以标注对象从「开发中」换成「不联网」：
+     要标的从来不是「没做」，而是「哪一部分没做」。 */
+  R['S3_能力边界有标注'] = (await page.locator('#view-search .soon').count()) === 1 &&
+    (await page.locator('#view-search .soon').first().innerText()).trim() === '不联网';
 
   // ② 溯源模块：从站内无命中处点过去，必须真的切成溯源、并给出两组入口
   await page.locator('#search-results #search-to-trace').click();
@@ -435,6 +474,32 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   await page.waitForTimeout(500);
   R['S8_溯源模块可深链'] = (await page.locator('#mode-trace').isVisible()) &&
     !(await page.locator('#mode-inside').isVisible());
+
+  /* ---- S 组续：AI 溯源助手（L3 点亮 · Day 22 新增） ----
+     L3 是本站第一个「点一下就会花应用方钱」的功能，界面纪律要单独钉：
+     引导态不留白、AI 生成标注在位、**输入过短不许发模型请求**（空点也能烧额度）、
+     按钮触控达标。这里刻意**不**在检查里真跑一次模型调用：检查要能离线重复跑，
+     而真调用在本地会因 Origin 校验失败 —— 线上真调用由 probe-online.js 负责验。 */
+  R['S10_AI区有引导态'] = (await page.locator('#ai-result .empty-state').count()) === 1;
+  R['S11_AI生成标注在位'] = (await page.locator('#ai-title .ai-badge').count()) === 1;
+
+  R['S12_输入过短不发模型请求'] = await (async () => {
+    const countLlm = () => requests.filter((u) => /\/\.cloud\/llm|chat\/completions/.test(u)).length;
+    const before = countLlm();
+    await page.fill('#ai-input', '短');
+    await page.locator('#ai-run').click();
+    await page.waitForTimeout(700);
+    const after = countLlm();
+    const guided = (await page.locator('#ai-result .empty-state').count()) === 1 &&
+      (await page.locator('#ai-result .state-error').count()) === 0;
+    await page.fill('#ai-input', '');
+    return after === before && guided;
+  })();
+
+  R['S13_AI按钮触控达标'] = await page.evaluate(() => {
+    const btns = [...document.querySelectorAll('.ai-panel button')].filter((b) => b.offsetParent !== null);
+    return btns.length >= 3 && btns.every((b) => Math.round(b.getBoundingClientRect().height) >= 44);
+  });
 
   /* ---- F 组：论坛（F3 骨架 · Day 19 新增） ----
      论坛的立身之本，逐条钉死：
@@ -560,6 +625,23 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   // 身份动作同理：登录/发码/验证只许出现在 auth.js，页面只调 auth.xxx()
   R['A2_身份动作只在身份层'] = PAGE_SCRIPTS.every((f) =>
     !/sendOtp|verifyOtp|signInWithPassword|resetPasswordForEmail|onAuthStateChange/.test(readSrc(f)));
+
+  /* Day 22：AI 调用同理，只许出现在 AI 接口层（ai.js）。
+     多一层不是为了好看——模型调用是「能烧钱、能被人诱导说话」的能力，
+     散在页面里就没法统一加限流、系统提示词与错误分流这三道闸。 */
+  R['A3_AI调用只在AI接口层'] = PAGE_SCRIPTS.every((f) =>
+    !/chat\.completions|llm\.models|llm\.chat/.test(readSrc(f)));
+
+  /* AI 接口层自己也要守平台纪律（照 cloud-service/llm 的完成标准）：
+     只支持流式（非流式会被 SDK 直接拒）、messages[0] 必须是应用方的 system 消息
+     （SDK 不替我们补，缺了就报错），而且系统提示词里必须留着两条安全底线。 */
+  const aiSrc = readSrc('js/ai.js');
+  R['A4_AI调用只流式且system打头'] = /stream:\s*true/.test(aiSrc) &&
+    /role:\s*"system"/.test(aiSrc) &&
+    !/stream:\s*false/.test(aiSrc);
+  R['A5_提示词含不判真伪与禁链'] = /不做真伪判决/.test(aiSrc) &&
+    /不要输出任何网址/.test(aiSrc) &&
+    /待整理的内容/.test(aiSrc);   // 材料里的「命令」不当指令 —— 防提示注入那条
 
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });

@@ -67,10 +67,11 @@
 
     <!-- 视图二：查询检索（主打功能）—— 页内两个模块
          ① 站内搜索：查本站已核查库，命中直接给卡片；
-         ② 全网溯源：把关键词同时投向「官方来源」与「网络来源」两组渠道，人工多源比对。
+         ② 全网溯源：L3 AI 溯源助手（拆解材料 + 指路）+「官方来源」与「网络来源」两组人工入口。
          两者共用一个检索框（输入一次，随时来回切换）。
-         本期纯静态能做的都做了：L1 站内检索 + L1 多源溯源入口 + L2「自己怎么验」四步清单；
-         L3 自动抓取网页 + AI 整合摘要待接后端点亮（见 api-contract.md 第三节 /api/search）。 -->
+         L1 站内检索 + L1 多源溯源入口 + L2「自己怎么验」四步清单 + **L3 AI 整理已点亮**（Day 22）；
+         仍缺的是「自动联网抓取」——本环境后端只有 LLM、没有搜索通道，故由 AI 整理该查什么、
+         由人点开两组入口去看（如实标注，不假装已联网）。见 api-contract.md 第三节 /api/search。 -->
     <section id="view-search" class="view" role="tabpanel" aria-labelledby="tab-search" tabindex="0" aria-label="查询检索">
       <div class="view-head">
         <div>
@@ -106,16 +107,47 @@
         <div id="search-results" class="search-results"></div>
       </div>
 
-      <!-- 模块二：全网溯源（官方来源 / 网络来源 两组） -->
+      <!-- 模块二：全网溯源
+           ① L3 AI 溯源助手（Day 22 点亮）：粘一段材料 → AI 拆成「主张 / 常见套路 /
+              必查三件事 / 检索式」四段。**只做整理与指路，不判真伪** —— 产品定位是
+              「证据整理员，不是审判官」，AI 出的内容一律带「AI 生成 · 不是结论」标注。
+              注：自动联网抓取在本环境做不到（托管后端只有 LLM，没有搜索/抓取通道），
+              所以「该查什么」由 AI 整理、「查到的东西」仍由人点开下面两组入口去看。
+           ② 官方来源 / 网络来源两组人工入口：AI 给的检索式可一键带进这里。 -->
       <div class="search-mode" id="mode-trace" role="region" aria-label="全网溯源" hidden>
         <div class="trace-head">
-          <h3 class="trace-title">同一句话，官方和网络各是怎么说的</h3>
-          <p class="trace-sub">本站不做裁判，只帮你把两边的说法摆到一起——权威渠道集体沉默，本身就是个信号。</p>
+          <h3 class="trace-title">先让 AI 拆开，再去官方和网络两边核对</h3>
+          <p class="trace-sub">本站不做裁判：AI 只帮你把「它在主张什么、这类说法有什么特征、该查哪几件事」摆清楚，说法真假由你对着原始出处自己判断。</p>
         </div>
+
+        <section class="ai-panel" aria-labelledby="ai-title">
+          <div class="ai-panel-head">
+            <h4 class="ai-title" id="ai-title">AI 溯源助手
+              <span class="ai-badge">AI 生成</span>
+            </h4>
+            <p class="ai-panel-note"><span class="soon">不联网</span>把要核查的说法<b>原文</b>粘进来（群消息、截图里的文字、链接标题都行），AI 拆成「主张 / 常见套路 / 必查三件事 / 检索式」四段。它<b>不判真伪</b>，也不能替你上网去查——网上到底怎么说，点开下面两组入口自己看。</p>
+          </div>
+
+          <textarea id="ai-input" class="ai-input" rows="4" maxlength="2000"
+                    aria-label="粘贴要核查的说法原文"
+                    placeholder="例：家里群里说「下月起电价按新阶梯走」，配了一张看不清落款和时间栏的表格截图。（10–2000 字）"></textarea>
+
+          <div class="ai-samples" id="ai-samples" role="group" aria-label="示例材料">
+            <button type="button" class="chip" data-ai-sample="群里说：下个月起电价按新阶梯走，配了一张看不清落款和时间栏的表格截图。">示例：电价新阶梯</button>
+            <button type="button" class="chip" data-ai-sample="15 秒短视频说本地地铁下周起取消安检，只有片段，没看到任何官方通报。">示例：地铁取消安检</button>
+            <button type="button" class="chip" data-ai-sample="转发消息说医保个人账户年底要清零，让大家赶紧取出来，没有落款。">示例：医保账户清零</button>
+          </div>
+
+          <div class="ai-bar">
+            <button type="button" class="ai-run" id="ai-run">让 AI 拆解</button>
+            <button type="button" class="ai-stop" id="ai-stop" hidden>停止</button>
+            <span class="ai-count" id="ai-count">0 / 2000</span>
+          </div>
+
+          <div class="ai-result" id="ai-result" aria-live="polite"></div>
+        </section>
+
         <div id="trace-results" class="trace-results"></div>
-        <p class="search-soon" id="trace-ai-soon">
-          <span class="soon">开发中</span>自动抓取网页 + AI 整合摘要需要后端支持，接通后这两组里会直接列出结果；现在请点开入口自己比对。
-        </p>
       </div>
 
       <!-- L2 引导式查证清单：两个模块共用，本站「证据整理员」定位最实在的抓手，纯静态即可用 -->
@@ -248,9 +280,10 @@
 
   <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式） -->
   <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
-  <!-- 公开配置 → 数据接口层 → 页面数据层 → 身份层，顺序不能换（后者依赖前者） -->
+  <!-- 公开配置 → 数据接口层 / AI 接口层 → 页面数据层 → 身份层，顺序不能换（后者依赖前者） -->
   <script src="js/cloud-config.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/ai.js"></script>
   <script src="js/data.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/home.js"></script>

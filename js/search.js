@@ -2,13 +2,15 @@
    search.js — 查询检索（主打功能）
    页内两个模块（共用一个检索框，输入一次即可来回切）：
      ① 站内搜索（inside）—— 查本站已核查库，命中直接给卡片（可点进详情）
-     ② 全网溯源（trace） —— 把关键词同时投向「官方来源」和「网络来源」两组渠道，
-                            自己点开比对。本站不做裁判，只把两边的说法摆到一起。
+     ② 全网溯源（trace） —— 上半是 **AI 溯源助手**（L3，Day 22 点亮）：粘一段材料，
+                            AI 拆成「主张 / 常见套路 / 必查三件事 / 检索式」四段；
+                            下半是「官方来源」「网络来源」两组入口，拿 AI 给的检索式
+                            一键带进去，自己点开比对。本站不做裁判。
    模块切换走地址栏第二段（#/search/inside、#/search/trace）：
    刷新、分享链接、浏览器前进后退都能回到同一个模块——与 Day 13 的视图路由同一套原则。
-   本期纯静态能做的都做了；还没做的：
-     · L3 自动抓取网页 + AI 整合摘要 —— 需后端（api-contract.md 第三节 /api/search），
-       界面只留一行「开发中」，不假装已有。
+   还缺的一角（如实标注，不假装已有）：
+     · 「自动联网抓取」—— 托管后端只有 LLM、没有搜索/抓取通道，做不了。
+       所以 AI 给的是「该去搜什么」，网上「已经有什么」仍需人点开入口自己看。
    与全站一致的部分：四态沿用 renderListState / stateGuard，命中卡片复用 renderCard。
    ============================================================ */
 
@@ -118,6 +120,290 @@ function renderTraceResults() {
     "官方和网络两边的说法对不上时，先信原始出处。" +
     '比对完还是拿不准？<a href="index.html#/forum">发到论坛</a>，让大家一起帮你溯源。';
   box.appendChild(tip);
+}
+
+/* ============================================================
+   模块二上半：AI 溯源助手（Day 22 点亮 L3）
+   干什么：把用户粘进来的一段材料交给 AI，拆成「主张 / 常见套路 / 必查三件事 / 检索式」。
+   不干什么：**不判真伪**。判真伪是本站没有的能力，也是本站不背的责任——
+            AI 只做整理与指路，看的人自己去核对原始出处。
+   为什么不做「自动联网」：托管后端只有 LLM，没有搜索/抓取通道。所以措辞必须诚实：
+            AI 给的是「该去搜什么」，不是「网上已经有什么」。
+   安全纪律（三条都不能省）：
+     · 模型输出属于不可信内容 → 一律 escHtml / textContent 落地，绝不 innerHTML 直插；
+     · 用户输入只当材料，不进系统提示词（提示词在 ai.js，用户输入在下一条 user 消息里）；
+     · 这是个能烧应用方额度的按钮 → 冷却 + 运行中禁用，别让人连点。
+   ============================================================ */
+
+let aiRunning = false;      // 正在流式输出
+let aiController = null;    // 停止用的中断器
+let aiLastInput = "";       // 上次整理的材料（重试、交站方核查时复用）
+let aiCooldownTimer = null; // 冷却倒计时（1 秒一跳，归零自停）
+let aiSlowTimer = null;     // 「模型还在处理」提示（等太久要出声）
+
+const AI_IDLE_TEXT =
+  "粘一条要核查的说法进来，AI 会把它拆成「主张 / 常见套路 / 必查三件事 / 检索式」四段。" +
+  "它只做整理，不下判断——说法真假，对着原始出处自己看。";
+
+function aiBox() {
+  return document.getElementById("ai-result");
+}
+
+/** 引导态：还没开始整理时，结果区不留白 */
+function renderAiIdle() {
+  const box = aiBox();
+  if (!box) return;
+  renderListState(box, "empty", { text: AI_IDLE_TEXT });
+}
+
+/** 流式态：先给一条「正在整理」+ 一块逐字长出来的文本区 */
+function renderAiStreaming() {
+  const box = aiBox();
+  if (!box) return;
+  box.innerHTML =
+    '<div class="ai-stream">' +
+      '<p class="ai-stream-title">' +
+        '<span class="spinner" aria-hidden="true"></span>' +
+        '<span id="ai-stream-label">AI 正在整理…</span>' +
+        '<span class="ai-hint">（可以随时点「停止」）</span>' +
+      "</p>" +
+      '<pre class="ai-stream-text" id="ai-stream-text"></pre>' +
+    "</div>";
+
+  /* 有些模型会先长时间「想」再动笔（实测默认模型首字能等 150 秒）。
+     等太久不吭声，用户会以为页面卡死 —— 15 秒还没吐字就换一句话说明。 */
+  clearTimeout(aiSlowTimer);
+  aiSlowTimer = setTimeout(() => {
+    const label = document.getElementById("ai-stream-label");
+    if (label && aiRunning) label.textContent = "模型还在处理，再多等一会儿…";
+  }, 15000);
+}
+
+/** 每来一小段就往文本区追加（用 textContent：模型输出不可信，不进 HTML 解析） */
+function appendAiChunk(fullText) {
+  const el = document.getElementById("ai-stream-text");
+  if (!el) return;
+  clearTimeout(aiSlowTimer);              // 已经开始吐字，撤掉「还在处理」提示
+  const label = document.getElementById("ai-stream-label");
+  if (label) label.textContent = "AI 正在整理…";
+  el.textContent = fullText;
+  el.scrollTop = el.scrollHeight;   // 跟着长，别让用户自己滚
+}
+
+/**
+ * 完成态：把 AI 的四段文本渲染成卡片。
+ * @param {string} fullText AI 输出全文
+ * @param {Object} [opts]  note = 顶部提示（例如「已停止，下面是已经整理出的部分」）
+ */
+function renderAiResult(fullText, opts) {
+  opts = opts || {};
+  const box = aiBox();
+  if (!box) return;
+
+  const parsed = ai.parseAiSections(fullText);
+  let html = "";
+
+  if (opts.note) html += '<p class="ai-warn">' + escHtml(opts.note) + "</p>";
+  if (!parsed.parsed) {
+    // 模型没按四段格式走：不假装结构正确，直接说清并原样展示
+    html += '<p class="ai-warn">AI 这次没按四段格式输出，下面是原文：</p>';
+  }
+
+  parsed.sections.forEach((sec) => {
+    html += '<article class="ai-card">' +
+      '<h5 class="ai-card-title">' + escHtml(sec.title) + "</h5>";
+
+    if (sec.kind === "steps") {
+      const steps = ai.splitAiSteps(sec.body);
+      html += steps.length
+        ? '<ol class="ai-steps">' + steps.map((t) => "<li>" + escHtml(t) + "</li>").join("") + "</ol>"
+        : '<p class="ai-card-body">' + escHtml(sec.body) + "</p>";
+    } else if (sec.kind === "chips") {
+      const queries = ai.splitAiQueries(sec.body);
+      html += queries.length
+        ? '<p class="ai-card-note">点一个组合，直接带进下面的溯源入口：</p>' +
+          '<div class="ai-queries">' +
+            queries.map((q) =>
+              '<button type="button" class="ai-query" data-ai-query="' + escHtml(q) + '">' +
+                escHtml(q) +
+              "</button>"
+            ).join("") +
+          "</div>"
+        : '<p class="ai-card-body">' + escHtml(sec.body) + "</p>";
+    } else if (sec.kind === "list") {
+      const lines = ai.splitAiSteps(sec.body);   // 同样按行拆（容忍模型不写项目符号）
+      html += lines.length > 1
+        ? '<ul class="ai-list">' + lines.map((t) => "<li>" + escHtml(t) + "</li>").join("") + "</ul>"
+        : '<p class="ai-card-body">' + escHtml(sec.body) + "</p>";
+    } else {
+      html += '<p class="ai-card-body">' + escHtml(sec.body) + "</p>";
+    }
+    html += "</article>";
+  });
+
+  // 页脚是「诚实性底线」的落地处：AI 生成 + 不是结论 + 不联网 + 给出人工出口
+  html += '<p class="ai-foot">' +
+    '<span class="ai-badge">AI 生成</span>' +
+    "以上是 AI 对材料的<b>初步整理，不是结论</b>：它不联网核对，也可能出错。" +
+    "请点上面的检索入口，以官方通报和原始出处为准。" +
+    "</p>" +
+    '<div class="ai-actions">' +
+      '<a class="ai-golink" href="index.html#/forum">拿不准？去论坛问 →</a>' +
+      '<button type="button" class="ai-report" id="ai-report">把这条交站方核查</button>' +
+      '<span class="ai-rep-note" id="ai-rep-note" aria-live="polite"></span>' +
+    "</div>";
+
+  box.innerHTML = html;
+}
+
+/** 运行按钮的状态与倒计时（冷却中就别让人点） */
+function paintAiBar() {
+  const run = document.getElementById("ai-run");
+  const stop = document.getElementById("ai-stop");
+  const left = ai.cooldownLeft();
+
+  if (stop) stop.hidden = !aiRunning;
+  if (run) {
+    run.disabled = aiRunning || left > 0;
+    run.textContent = aiRunning ? "整理中…" : (left > 0 ? "冷却 " + left + "s" : "让 AI 拆解");
+  }
+}
+
+/** 冷却倒计时：每秒重画一次，归零就自己停掉 */
+function startAiCooldownTick() {
+  if (aiCooldownTimer) { clearInterval(aiCooldownTimer); aiCooldownTimer = null; }
+  if (ai.cooldownLeft() <= 0) { paintAiBar(); return; }
+  aiCooldownTimer = setInterval(() => {
+    paintAiBar();
+    if (ai.cooldownLeft() <= 0) {
+      clearInterval(aiCooldownTimer);
+      aiCooldownTimer = null;
+    }
+  }, 1000);
+}
+
+/** 把 AI 整理用的这条材料交给站方核查（走 api 层，未登录也能提交） */
+async function submitAiAsReport() {
+  const note = document.getElementById("ai-rep-note");
+  const btn = document.getElementById("ai-report");
+  const text = aiLastInput.slice(0, 500);   // reports.text 的库约束是 5–500 字
+
+  if (btn) btn.disabled = true;
+  if (note) note.textContent = " 提交中…";
+  try {
+    await api.submitReport({ text });
+    if (note) note.textContent = " 已提交，站方会逐条核查。";
+  } catch (e) {
+    if (note) note.textContent = " 提交失败：" + (e.message || "稍后再试。");
+    if (btn) btn.disabled = false;
+  }
+}
+
+/** 跑一次整理：校验 → 流式 → 卡片 / 中断 / 错误，各态都在这里收口 */
+async function runAi() {
+  if (aiRunning) return;
+
+  const ta = document.getElementById("ai-input");
+  aiLastInput = String(ta ? ta.value : "").trim();
+
+  if (aiLastInput.length < ai.MIN_CHARS) {
+    const box = aiBox();
+    if (box) {
+      renderListState(box, "empty", {
+        text: "还没粘材料（或太短了，至少 " + ai.MIN_CHARS + " 个字）。把要核查的那条说法原文贴进上面的框里再点。",
+      });
+    }
+    return;
+  }
+
+  aiRunning = true;
+  aiController = typeof AbortController === "function" ? new AbortController() : null;
+  paintAiBar();
+  renderAiStreaming();
+
+  try {
+    const full = await ai.digest({
+      text: aiLastInput,
+      signal: aiController ? aiController.signal : undefined,
+      onChunk: (_piece, fullText) => appendAiChunk(fullText),
+    });
+    renderAiResult(full);
+  } catch (e) {
+    if (e.aborted) {
+      if (e.partial && e.partial.trim()) {
+        renderAiResult(e.partial, { note: "已停止。下面是停下来之前整理出的部分——想完整的结果，点「让 AI 拆解」重新来一遍。" });
+      } else {
+        renderAiIdle();
+      }
+    } else {
+      const box = aiBox();
+      if (box) {
+        renderListState(box, "error", {
+          desc: e.message,
+          onRetry: runAi,   // 冷却 / 输入类问题重按也会被同一套校验挡住，文案不会骗人
+        });
+      }
+    }
+  } finally {
+    clearTimeout(aiSlowTimer);   // 收尾时撤掉「还在处理」提示，别留在下一次
+    aiRunning = false;
+    aiController = null;
+    paintAiBar();
+    startAiCooldownTick();
+  }
+}
+
+/** 绑定 AI 区的交互（输入计数 / 示例 / 整理 / 停止 / 检索式 / 交站方） */
+function initAi() {
+  const ta = document.getElementById("ai-input");
+  const count = document.getElementById("ai-count");
+
+  if (ta) {
+    ta.addEventListener("input", () => {
+      if (count) count.textContent = ta.value.length + " / " + ai.MAX_CHARS;
+    });
+  }
+
+  const samples = document.getElementById("ai-samples");
+  if (samples) {
+    samples.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-ai-sample]");
+      if (!btn || !ta) return;
+      ta.value = btn.dataset.aiSample;
+      if (count) count.textContent = ta.value.length + " / " + ai.MAX_CHARS;
+      ta.focus();
+    });
+  }
+
+  const run = document.getElementById("ai-run");
+  if (run) run.addEventListener("click", runAi);
+
+  const stop = document.getElementById("ai-stop");
+  if (stop) {
+    stop.addEventListener("click", () => { if (aiController) aiController.abort(); });
+  }
+
+  const box = aiBox();
+  if (box) {
+    box.addEventListener("click", (e) => {
+      // 检索式 → 带进「官方 / 网络」两组入口（AI 指路，人自己去看）
+      const q = e.target.closest("[data-ai-query]");
+      if (q) {
+        const kw = q.dataset.aiQuery;
+        searchKeyword = kw;
+        const input = document.getElementById("search-input");
+        if (input) input.value = kw;
+        renderSearchView();
+        const traceBox = document.getElementById("trace-results");
+        if (traceBox) traceBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        return;
+      }
+      if (e.target.closest("#ai-report")) submitAiAsReport();
+    });
+  }
+
+  paintAiBar();
+  renderAiIdle();
 }
 
 /* ============================================================
@@ -345,4 +631,5 @@ window.addEventListener("hashchange", () => {
 VIEW_RENDERERS.push(renderSearchView);
 
 initSearch();
+initAi();           // AI 溯源助手（L3）自成一套状态，不跟着关键词重绘
 renderSearchView(); // 首屏：若直接落在 #/search/trace，模块也直接落对

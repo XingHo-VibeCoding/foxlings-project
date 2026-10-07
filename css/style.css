@@ -54,6 +54,12 @@
   /* ---- Day 21 登录面板新增 ---- */
   --c-mask: rgba(30, 40, 80, .45); /* 弹层遮罩底 */
 
+  /* ---- Day 22 AI 溯源助手（L3 点亮）新增 ----
+     AI 面板要一眼看出「这块是机器生成的」，所以给它专属的浅底与描边，
+     与人工内容的白卡片区分开；文字仍复用已验证的 --c-text / --c-muted / --c-doubt-deep。 */
+  --c-ai-bg: #f7f8ff;         /* AI 面板底（浅一档，和普通卡片区分） */
+  --c-ai-line: #c7cdf5;       /* AI 面板描边 / 流式文本框虚线 */
+
   --radius: 12px;
   --shadow: 0 2px 6px rgba(30, 40, 80, .08);
   --shadow-hover: 0 10px 24px rgba(30, 40, 80, .16);
@@ -345,9 +351,10 @@ body {
 .guide-note { font-size: 13px; color: var(--c-muted); margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--c-line-soft); }
 .guide-note a { color: var(--c-primary); }
 
-/* L3 占位行：还没做的能力如实标注，不假装已有 */
-.search-soon { font-size: 12px; color: var(--c-muted); margin-bottom: 20px; }
-.search-soon .soon {
+/* 「能力边界」小标签：没做到的能力如实标注，不假装已有。
+   Day 17 立这条规矩（当时标的是「开发中」），Day 22 点亮 L3 后标的内容
+   跟着换成了「不联网」——要标的不是「没做」，而是「哪一部分没做」。 */
+.soon {
   display: inline-block; margin-right: 6px; padding: 3px 10px; border-radius: 12px;
   background: var(--c-doubt-soft); color: var(--c-doubt-deep);
 }
@@ -390,6 +397,93 @@ body {
 .trace-tip { font-size: 13px; color: var(--c-muted); margin: 4px 0 14px; }
 .trace-tip b { color: var(--c-text); }
 .trace-tip a { color: var(--c-primary); }
+
+/* ---------- AI 溯源助手（L3 · Day 22 新增） ----------
+   设计意图：机器生成的内容必须「一眼看得出是机器生成的」——
+   面板给专属浅底 + 描边，与白卡片的人工内容分开；结果每段一张卡，页脚统一挂免责与人工出口。 */
+.ai-panel {
+  background: var(--c-ai-bg); border: 1px solid var(--c-ai-line);
+  border-radius: var(--radius); padding: 16px 16px 14px; margin-bottom: 16px;
+}
+.ai-panel-head { margin-bottom: 10px; }
+.ai-title { font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ai-badge {
+  font-size: 12px; font-weight: normal; padding: 3px 10px; border-radius: 12px;
+  background: var(--c-doubt-soft); color: var(--c-doubt-deep);
+}
+.ai-panel-note { font-size: 13px; color: var(--c-muted); margin-top: 6px; line-height: 1.7; }
+.ai-panel-note b { color: var(--c-text); }
+
+.ai-input {
+  width: 100%; box-sizing: border-box; font-family: inherit; font-size: 13px; line-height: 1.7;
+  color: var(--c-text); background: var(--c-card); border: 1px solid var(--c-input-border);
+  border-radius: var(--radius); padding: 10px 12px; resize: vertical; min-height: 88px;
+}
+.ai-input:focus { border-color: var(--c-primary); outline: 2px solid var(--c-primary); outline-offset: 1px; }
+
+.ai-samples { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ai-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.ai-run {
+  min-height: 44px; padding: 0 20px; border: none; border-radius: var(--radius);
+  background: var(--c-primary); color: var(--c-white);
+  font-size: 14px; font-weight: bold; cursor: pointer; transition: background .25s;
+}
+.ai-run:hover:not(:disabled) { background: var(--c-primary-dark); }
+.ai-run:disabled { opacity: .55; cursor: not-allowed; }
+.ai-stop {
+  min-height: 44px; padding: 0 16px; border: 1px solid var(--c-chip-border);
+  border-radius: var(--radius); background: var(--c-card); color: var(--c-chip-text);
+  font-size: 13px; cursor: pointer;
+}
+.ai-stop:hover { background: var(--c-hover-bg); border-color: var(--c-primary); }
+.ai-count { font-size: 12px; color: var(--c-muted); margin-left: auto; }
+
+.ai-result { margin-top: 12px; display: grid; gap: 10px; }
+.ai-stream-title { font-size: 13px; color: var(--c-muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ai-hint { font-size: 12px; }
+.ai-stream-text {
+  margin-top: 8px; padding: 12px; max-height: 300px; overflow: auto;
+  background: var(--c-card); border: 1px dashed var(--c-ai-line); border-radius: var(--radius);
+  font-family: inherit; font-size: 13px; line-height: 1.75; color: var(--c-text);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.ai-card {
+  background: var(--c-card); border: 1px solid var(--c-line);
+  border-radius: var(--radius); padding: 12px 14px;
+}
+.ai-card-title { font-size: 14px; margin-bottom: 6px; }
+.ai-card-body { font-size: 13px; color: var(--c-text); line-height: 1.75; }
+.ai-card-note { font-size: 12px; color: var(--c-muted); margin-bottom: 8px; }
+.ai-list, .ai-steps { font-size: 13px; color: var(--c-text); line-height: 1.75; padding-left: 20px; }
+.ai-list li, .ai-steps li { margin-bottom: 4px; }
+
+/* 检索式可点：点了就带进下面「官方 / 网络」两组入口 —— AI 指路，人自己去看 */
+.ai-queries { display: flex; gap: 8px; flex-wrap: wrap; }
+.ai-query {
+  min-height: 44px; padding: 8px 14px; border: 1px solid var(--c-chip-border);
+  border-radius: 10px; background: var(--c-card); color: var(--c-text);
+  font-size: 13px; cursor: pointer; text-align: left; transition: background .25s, border-color .25s;
+}
+.ai-query:hover { background: var(--c-hover-bg); border-color: var(--c-primary); }
+
+/* 输出不合格式 / 中途停止这类「有话说」的提示，用暖色：不是错误，是提醒 */
+.ai-warn {
+  font-size: 13px; line-height: 1.7; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--c-partial-soft); color: var(--c-partial-deep);
+}
+.ai-foot { font-size: 12px; color: var(--c-muted); line-height: 1.9; }
+.ai-foot b { color: var(--c-text); }
+.ai-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.ai-golink { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; color: var(--c-primary); }
+.ai-report {
+  min-height: 44px; padding: 0 16px; border: 1px solid var(--c-chip-border);
+  border-radius: var(--radius); background: var(--c-card); color: var(--c-chip-text);
+  font-size: 13px; cursor: pointer;
+}
+.ai-report:hover:not(:disabled) { background: var(--c-hover-bg); border-color: var(--c-primary); }
+.ai-report:disabled { opacity: .55; cursor: not-allowed; }
+.ai-rep-note { font-size: 12px; color: var(--c-muted); }
 
 /* ---------- 论坛（F3） ---------- */
 /* 发帖区：Day 21 起需登录 —— 未登录只给登录出口，登录后才是真表单 */
