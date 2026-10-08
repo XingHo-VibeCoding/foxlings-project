@@ -115,6 +115,31 @@ COMMENT ON TABLE reports IS '用户提交的待核查线索：未登录可提交
 
 CREATE INDEX idx_reports_queue ON reports (status, created_at);
 
+-- ---------------------------------------------------------------------------
+-- ④ profiles — 用户资料（Day 22 新增：昵称 / 个性签名 / 头像）
+--   用户可见的「我是谁」：昵称与头像会显示在论坛帖子上，属**公开**信息；
+--   个性签名只出现在自己的个人主页。
+--   avatar_kind / avatar_value 两列表达一个头像：
+--     preset → avatar_value 是站内预设 id（如 'p2'），无需文件、无需签名；
+--     upload → avatar_value 是云存储对象路径（shared/<uid>/avatars/xxx.jpg）。
+--   ⚠️ 头像图片本身存在云存储，读它必须先换**短时签名 URL**（最长 1 小时）——
+--      所以签名 URL 绝不写进这张表，每次渲染现取；表里只存路径这个稳定事实。
+--   RLS 一律 TO authenticated（未登录连读都不给）：论坛访客看到的作者昵称
+--   来自 posts.author_name 这个冗余字段，不需要读这张表。
+-- ---------------------------------------------------------------------------
+CREATE TABLE profiles (
+  user_id      TEXT        PRIMARY KEY DEFAULT auth.uid(),  -- 权限字段；新建时客户端不传，由服务端填
+  nickname     TEXT        NOT NULL CHECK (char_length(btrim(nickname)) BETWEEN 1 AND 20),
+  bio          TEXT        NOT NULL DEFAULT '' CHECK (char_length(bio) <= 80),
+  avatar_kind  TEXT        NOT NULL DEFAULT 'preset'
+               CHECK (avatar_kind IN ('preset', 'upload')),
+  avatar_value TEXT,                                        -- 预设 id，或云存储路径
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE profiles IS '用户资料：昵称与头像公开显示在论坛帖子上；签名只在个人主页。头像文件在云存储 shared/<uid>/avatars/，本表只存路径';
+
 COMMIT;
 
 -- ============================================================================

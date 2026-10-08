@@ -129,7 +129,8 @@ function renderPost(post, index, isPending) {
     "</div>" +
     '<h3 class="post-title">' + escHtml(post.title) + "</h3>" +
     '<p class="post-body">' + escHtml(post.body) + "</p>" +
-    '<p class="post-meta">发起人：' + escHtml(post.author_name || "匿名") + "</p>" +
+    '<p class="post-meta">' + avatarHtml(post.author_id, post.author_name, "fx-avatar-xs") +
+      '<span class="post-meta-name">发起人：' + escHtml(post.author_name || "匿名") + "</span></p>" +
     (isPending ? '<p class="post-pending-note">这条还在人工审核队列里，只有你自己看得到；通过后才会出现在上面的公开列表中。</p>' : "") +
     relHtml;
   return el;
@@ -254,6 +255,19 @@ function renderCompose() {
     const email = auth.session && auth.session.user ? auth.session.user.email : "";
     who.textContent = email ? "已登录：" + maskEmail(email) : "已登录";
   }
+
+  if (signed) fillComposeName();
+}
+
+/**
+ * 发帖区的昵称：优先用「我的资料」里的昵称（省得每次重填），
+ * 已经填了就不覆盖 —— 用户手改到一半时把内容冲掉比不预填更讨厌。
+ */
+function fillComposeName() {
+  const el = document.getElementById("compose-name");
+  if (!el || el.value.trim()) return;
+  const me = myProfile();
+  el.value = (me && me.nickname) || localStorage.getItem(NAME_KEY) || "";
 }
 
 function composeSay(html, ok) {
@@ -274,32 +288,48 @@ function validateCompose(v) {
   return "";
 }
 
+/**
+ * 取发帖表单的五个节点。缺任何一个都说明界面结构坏了。
+ * Day 22 教训：这里原本是 `if (!x) return;` —— 一旦 HTML 与脚本对不上，
+ * 提交就成了「点下去毫无反应」，而且控制台一声不响，最难查。
+ * 现在改成抛错，由下面的 catch 统一变成用户看得见的一句话。
+ */
+function composeFields() {
+  const f = {
+    name: document.getElementById("compose-name"),
+    title: document.getElementById("compose-title"),
+    cat: document.getElementById("compose-cat"),
+    body: document.getElementById("compose-body"),
+    btn: document.getElementById("compose-submit"),
+  };
+  const missing = Object.keys(f).filter((k) => !f[k]);
+  if (missing.length) {
+    throw new Error("发帖表单结构异常（缺少 " + missing.join(" / ") + "），请刷新页面后重试。");
+  }
+  return f;
+}
+
 async function submitCompose(e) {
   e.preventDefault();
 
-  const nameEl = document.getElementById("compose-name");
-  const titleEl = document.getElementById("compose-title");
-  const catEl = document.getElementById("compose-cat");
-  const bodyEl = document.getElementById("compose-body");
+  // 按钮先进入忙态：无论后面哪一步出错，用户都知道「点了，正在处理」
   const btn = document.getElementById("compose-submit");
-  if (!nameEl || !titleEl || !catEl || !bodyEl || !btn) return;
-
-  const v = {
-    name: nameEl.value.trim(),
-    title: titleEl.value.trim(),
-    cat: catEl.value,
-    body: bodyEl.value.trim(),
-  };
-
-  const bad = validateCompose(v);
-  if (bad) { composeSay(bad, false); return; }
-
-  const idle = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "提交中…";
-  composeSay("");
+  const idle = btn ? btn.textContent : "提交审核";
+  if (btn) { btn.disabled = true; btn.textContent = "提交中…"; }
 
   try {
+    const f = composeFields();
+    const v = {
+      name: f.name.value.trim(),
+      title: f.title.value.trim(),
+      cat: f.cat.value,
+      body: f.body.value.trim(),
+    };
+
+    const bad = validateCompose(v);
+    if (bad) { composeSay(bad, false); return; }
+    composeSay("");
+
     // 身份兜底：会话过期时这里会重新弹登录框，登完再继续
     const ok = await auth.require("发帖需要一个身份（帖子得有人负责）。");
     if (!ok) {
@@ -315,16 +345,17 @@ async function submitCompose(e) {
     });
 
     localStorage.setItem(NAME_KEY, v.name);
-    titleEl.value = "";
-    bodyEl.value = "";
+    f.title.value = "";
+    f.body.value = "";
     composeSay("已提交，进入人工审核队列。通过后会出现在上面的列表里" +
       "（在那之前只有你自己看得到它）。", true);
     await refreshPosts();          // 把「我的待审」拉出来给作者看见
   } catch (err) {
+    // 任何异常都要变成用户看得见的一句话：静默失败是最难查的 bug
+    console.error("[forum] 发帖失败：", err);
     composeSay(escHtml(err.message || "提交失败，请重试。"), false);
   } finally {
-    btn.disabled = false;
-    btn.textContent = idle;
+    if (btn) { btn.disabled = false; btn.textContent = idle; }
   }
 }
 
@@ -357,11 +388,12 @@ function initForumUI() {
   const form = document.getElementById("compose-form");
   if (form) form.addEventListener("submit", submitCompose);
 
-  const nameEl = document.getElementById("compose-name");
-  if (nameEl) nameEl.value = localStorage.getItem(NAME_KEY) || "";
+  // 昵称不在这里预填：资料是异步取回来的，等 renderCompose 在资料就绪后再填
+  // （fillComposeName 只在输入框为空时动手，不会冲掉用户已经打的字）
 
   // 登录 / 退出后：发帖区与徽卡都要跟着变，列表也可能多出「我的待审」
   auth.onChange(async () => {
+    resetProfileCache();   // 换人了：资料与头像签名一律作废
     renderCompose();
     await refreshPosts();
   });
@@ -375,7 +407,9 @@ async function initForumData() {
   renderForumView();
 
   try {
-    ALL_POSTS = await loadPostsForPage();
+    // 帖子与资料一起等：头像要等资料（含签名 URL）就绪再画，
+    // 否则会先渲染一批色块、再整屏重画一次，闪得很难看
+    ALL_POSTS = (await Promise.all([loadPostsForPage(), ensureProfiles()]))[0];
     POST_STATE = "ok";
   } catch (err) {
     console.error("[forum] 帖子加载失败：", err);
@@ -388,7 +422,8 @@ async function initForumData() {
 /** 重新拉一次帖子（发帖成功、登录状态变化后调用）。失败不打断当前界面。 */
 async function refreshPosts() {
   try {
-    ALL_POSTS = await loadVerifiedPosts();
+    // 资料也要重取：换了头像/昵称后，这里得跟着变
+    ALL_POSTS = (await Promise.all([loadVerifiedPosts(), ensureProfiles()]))[0];
     POST_STATE = "ok";
   } catch (err) {
     console.error("[forum] 帖子刷新失败：", err);

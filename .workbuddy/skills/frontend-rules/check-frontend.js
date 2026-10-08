@@ -616,11 +616,12 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
      「分层」在本项目的含义：页面只认 api.xxx() 与 auth.xxx()，
      谁直接摸 SDK / 数据库 / 本地 json，谁就是在给下一次换数据源埋雷。
      扫的是源码不是运行时 —— 运行时盯不住「哪一层写的这行代码」。 */
-  const PAGE_SCRIPTS = ['js/data.js', 'js/home.js', 'js/search.js', 'js/forum.js', 'js/mine.js', 'js/detail.js'];
+  const PAGE_SCRIPTS = ['js/data.js', 'js/home.js', 'js/search.js', 'js/forum.js', 'js/mine.js', 'js/detail.js', 'js/profile.js'];
   const readSrc = (f) => { try { return fs.readFileSync(ROOT + '/' + f, 'utf8'); } catch (e) { return ''; } };
 
+  // Day 22：云存储也归「数据源」—— 页面不许自己 upload / createSignedUrls
   R['A1_页面不绕过接口层碰数据'] = PAGE_SCRIPTS.every((f) =>
-    !/cloud\.database|\.from\(["']|WorkBuddyCloud|fetch\(/.test(readSrc(f)));
+    !/cloud\.database|cloud\.storage|\.from\(["']|WorkBuddyCloud|fetch\(/.test(readSrc(f)));
 
   // 身份动作同理：登录/发码/验证只许出现在 auth.js，页面只调 auth.xxx()
   R['A2_身份动作只在身份层'] = PAGE_SCRIPTS.every((f) =>
@@ -642,6 +643,92 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   R['A5_提示词含不判真伪与禁链'] = /不做真伪判决/.test(aiSrc) &&
     /不要输出任何网址/.test(aiSrc) &&
     /待整理的内容/.test(aiSrc);   // 材料里的「命令」不当指令 —— 防提示注入那条
+
+  /* ---- H 组：HTML 与脚本的结构契约（Day 22 新增 · 源自一次真实事故） ----
+     事故复盘：index.html 里发帖区的标题 <h3 id="compose-title"> 和标题输入框
+     <input id="compose-title"> 撞了同一个 id。getElementById 只返回文档里第一个，
+     forum.js 拿到的「标题输入框」其实是那个 h3，.value 是 undefined，取值当场抛错 ——
+     按钮不变、提示不出、请求不发，用户在线上看到的就是「点提交毫无反应」，
+     控制台也没有一行红字。这是本项目至今最隐蔽的一个 bug。
+
+     这类错误眼睛看不出来（两处隔了 30 行、看着都挺对），静态一扫就现形。断三条：
+       H1 每个 HTML 内部 id 必须唯一 —— 撞名就是给 getElementById 埋雷；
+       H2 页面脚本 getElementById 的 id 必须在该页 HTML 里，或在动态生成白名单里；
+       H3 白名单不许当后门：写进去的 id 必须真能在某个脚本里找到生成它的代码。 */
+  const HTML_OF = {
+    'js/data.js': 'index.html',    // 与 home / search / forum 同页，取一个代表
+    'js/home.js': 'index.html',
+    'js/search.js': 'index.html',
+    'js/forum.js': 'index.html',
+    'js/mine.js': 'mine.html',
+    'js/detail.js': 'detail.html',
+  };
+  const HTML_FILES = ['index.html', 'mine.html', 'detail.html'];
+  // 运行时才生成的 id（AI 面板 / 状态块 / 账号区按钮 / 资料表单）：HTML 源里没有它们，属正常
+  const DYNAMIC_IDS = ['ai-rep-note', 'ai-report', 'ai-stream-label', 'ai-stream-text',
+                       'source-clear', 'account-signin', 'account-signout',
+                       'profile-signin', 'pf-preview', 'pf-nickname', 'pf-bio',
+                       'pf-presets', 'pf-file', 'pf-note', 'pf-save'];
+
+  const htmlIds = {};
+  HTML_FILES.forEach((f) => {
+    htmlIds[f] = [...readSrc(f).matchAll(/(^|["' ])id="([^"]+)"/g)].map((m) => m[2]);
+  });
+
+  const dupDetail = [];
+  R['H1_页面id不重复'] = HTML_FILES.every((f) => {
+    const c = {};
+    htmlIds[f].forEach((id) => { c[id] = (c[id] || 0) + 1; });
+    const dups = Object.keys(c).filter((k) => c[k] > 1);
+    if (dups.length) dupDetail.push(f + ': ' + dups.map((d) => d + ' ×' + c[d]).join('、'));
+    return dups.length === 0;
+  });
+  if (dupDetail.length) O['H1_重复id明细'] = dupDetail.join('；');
+
+  const missDetail = [];
+  R['H2_脚本引用的id都在页面里'] = Object.keys(HTML_OF).every((js) => {
+    const src = readSrc(js);
+    const ids = [...new Set([...src.matchAll(/getElementById\((['"])([^'"]+)\1\)/g)].map((m) => m[2]))];
+    const have = new Set(htmlIds[HTML_OF[js]]);
+    const miss = ids.filter((id) => !have.has(id) && DYNAMIC_IDS.indexOf(id) === -1);
+    if (miss.length) missDetail.push(js + ' → ' + miss.join(' / '));
+    return miss.length === 0;
+  });
+  if (missDetail.length) O['H2_缺失id明细'] = missDetail.join('；');
+
+  const allScriptSrc = PAGE_SCRIPTS.concat(['js/api.js', 'js/auth.js', 'js/ai.js']).map(readSrc).join('\n');
+  const orphanIds = DYNAMIC_IDS.filter((id) => allScriptSrc.indexOf('id="' + id + '"') === -1);
+  R['H3_白名单里的id确有出处'] = orphanIds.length === 0;
+  if (orphanIds.length) O['H3_无出处白名单'] = orphanIds.join(' ');
+
+  /* ---- P 组：个性化（Day 22 新增：昵称 / 个性签名 / 头像） ----
+     断三件事：
+       P1 论坛帖子真的带头像 —— 不是「代码里写了」而已；
+       P2 个人主页在未登录时给的是登录出口，不是一张填不了的表单；
+       P3 头像元素有真实宽高 —— 0 宽高说明样式没生效（元素在、但看不见）。 */
+  await page.setViewportSize({ width: 1280, height: 790 });
+  await page.goto(BASE + '/#/forum', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(900);
+
+  const postCount = await page.locator('#forum-list .post-card').count();
+  const avatarInPosts = await page.locator('#forum-list .post-card .fx-avatar').count();
+  R['P1_论坛帖子带头像'] = postCount > 0 && avatarInPosts >= postCount;
+  O['P1_帖子与头像'] = postCount + ' 帖 / ' + avatarInPosts + ' 头像';
+
+  const avBox = await page.evaluate(() => {
+    const el = document.querySelector('#forum-list .post-card .fx-avatar');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height) };
+  });
+  R['P3_头像尺寸非零'] = !!avBox && avBox.w >= 20 && avBox.h >= 20;
+  O['P3_头像实测'] = avBox ? avBox.w + '×' + avBox.h : '(页面上没有头像)';
+
+  await page.goto(BASE + '/mine.html', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(900);
+  const guestBtn = await page.locator('#profile-body #profile-signin').count();
+  const guestForm = await page.locator('#profile-body #pf-nickname').count();
+  R['P2_未登录资料区给登录出口'] = guestBtn === 1 && guestForm === 0;
 
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });

@@ -39,7 +39,7 @@
 | `http://localhost:8000/#/search/trace` | 查询检索 · **全网溯源**模块：上半是 **AI 溯源助手**（L3，Day 22 点亮），下半是官方来源 / 网络来源两组入口，带关键词直达 |
 | `http://localhost:8000/#/forum` | 论坛（Day 21 起接后端：帖子来自云库；发帖需登录，先经人工审核再公开；本地预览时登录入口会提示"只在发布域名可用"） |
 | `http://localhost:8000/detail.html?id=20261005-01` | 详情页示例：溯源时间线 + 信源比对 + 复制/收藏 |
-| `http://localhost:8000/mine.html` | 个人主页：账号（登录/退出）+ 我的收藏 + 浏览足迹 + 我提交的线索（登录后存云端）+ 判断方法 |
+| `http://localhost:8000/mine.html` | 个人主页：账号（登录/退出）+ **我的资料（昵称 / 个性签名 / 头像）** + 我的收藏 + 浏览足迹 + 我提交的线索（登录后存云端）+ 判断方法 |
 
 点榜单任意卡片即可进入对应详情页（地址带 `?id=条目id`）；右上角头像进个人主页。
 
@@ -125,14 +125,16 @@
 **Day 20~21 起：页面数据不再读这些文件** —— 前端经 `js/api.js` 直连云数据库（托管后端），
 `data/*.json` 降级为**种子源头**：改内容 → `node db/json-to-sql.js --single`（条目）/ `node db/posts-to-sql.js --single`（帖子）
 → 把生成的语句灌入库。表结构与 RLS 闸门的权威文档见 `db/schema.sql` 与 `api-contract.md` 第四/五节
-（三张表均已建好：items 23 条、posts 7 条；reports 为空表，等真实用户提交）。
+（四张表均已建好：items 23 条、posts 7 条、reports 1 条种子、profiles 空表等真实用户填写）。
 
 ## 部署
 
 - **已上线（Day 16 首发；Day 20/21 版本已重新发布）**：<https://rumor-check-12000.app.workbuddy.host/>（WorkBuddy 发布，静态托管）。
   内容更新后需重新发布。**每次发布后跑一遍公网检查**：`node probe-online.js`（19 项，记录见 `docs/day20-public-check.md`）。
-- **登录相关功能（登录、发帖、账号区）只在发布域名上可用** —— 托管后端的邮箱登录按来源域名校验，
+- **登录相关功能（登录、发帖、账号区、传头像）只在发布域名上可用** —— 托管后端的邮箱登录按来源域名校验，
   本地预览登不上，GitHub Pages 备用地址同样会因 Origin 不匹配而连不上云库。要测登录请用上面的公网地址。
+  **云存储上传同理**：本地跨域调 `/.cloud/storage/*` 会被 CORS 拦（实测 `x-client-info` 头不在允许列表里），
+  线上是同源、不走 preflight，所以头像上传只可能在发布后的网址上跑通。
 - GitHub Pages（可选备用）：仓库 Settings → Pages → 选择 main 分支根目录，得到
   `https://xingho-vibecoding.github.io/foxlings-project/` —— 仅能浏览静态部分，云数据库请求会被 Origin 校验拦下，**不再推荐**。
 

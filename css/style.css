@@ -704,3 +704,37 @@ body {
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes popIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 .card.pop { animation: popIn .45s both; }
+
+/* ============================================
+   Day 22 · 个性化（头像 / 资料表单）
+     · 头像三种尺寸共用一套 .fx-avatar，样式只在这里定义一次；
+     · 预设头像用「浅底深字」，色值全部走 :root 变量（不新增裸色值）；
+     · 预设是可点按钮 → 一律 ≥44px（触控门槛 B5）。
+   ============================================ */
+.fx-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 50%; overflow: hidden; flex: 0 0 auto;
+  font-size: 15px; font-weight: 700; line-height: 1;
+  background: var(--c-avatar-bg); color: var(--c-primary-dark);
+  user-select: none;
+}
+.fx-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.fx-avatar-xs { width: 24px; height: 24px; font-size: 12px; }
+.fx-avatar-lg { width: 72px; height: 72px; font-size: 22px; border: 1px solid var(--c-line); }
+
+button.pf-preset {
+  width: 44px; height: 44px; font-size: 17px;
+  border: 2px solid transparent; padding: 0; cursor: pointer;
+}
+button.pf-preset:hover { border-color: var(--c-chip-border); }
+button.pf-preset.active { border-color: var(--c-primary); }
+
+.pf-top { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
+.pf-preview { flex: 0 0 auto; }
+.pf-fields { flex: 1 1 260px; min-width: 0; }
+.pf-presets { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 16px; }
+.pf-file { display: block; max-width: 100%; margin: 4px 0 14px; font-size: 13px; color: var(--c-muted); }
+
+/* 帖子底部：头像与「发起人」并排一行 */
+.post-meta { display: flex; align-items: center; gap: 8px; }
+.post-meta-name { min-width: 0; }

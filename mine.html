@@ -39,6 +39,12 @@
       <div id="account-body"></div>
     </section>
 
+    <!-- ⓪ 我的资料（Day 22：昵称 / 个性签名 / 头像；表单由 mine.js 渲染） -->
+    <section class="mine-card" id="profile">
+      <h2>我的资料</h2>
+      <div id="profile-body"></div>
+    </section>
+
     <!-- ① 我的收藏（读详情页收藏的记录，键：fx_favs） -->
     <section class="mine-card">
       <h2>我的收藏</h2>
@@ -90,11 +96,12 @@
 
   <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式） -->
   <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
-  <!-- 公开配置 → 数据接口层 → 页面数据层 → 身份层，顺序不能换（后者依赖前者） -->
+  <!-- 公开配置 → 数据接口层 → 页面数据层 → 身份层 → 资料层，顺序不能换（后者依赖前者） -->
   <script src="js/cloud-config.js"></script>
   <script src="js/api.js"></script>
   <script src="js/data.js"></script>
   <script src="js/auth.js"></script>
+  <script src="js/profile.js"></script>
   <script src="js/mine.js"></script>
 </body>
 </html>

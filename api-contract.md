@@ -43,6 +43,23 @@
 
 校验规则在 `js/data.js`：缺必填字段或 verdict 非法的条目**跳过并在控制台警告**，页面照常渲染其余条目。
 
+### profiles（用户资料，存于云库 `profiles` 表 · Day 22）
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `user_id` | TEXT | 主键，DEFAULT `auth.uid()` | 权限锚点。新建时客户端**不传**，由服务端填 |
+| `nickname` | TEXT | 1–20 字（trim 后） | 显示在论坛帖子上（发帖时自动带出，也可手改） |
+| `bio` | TEXT | ≤80 字，默认 `''` | 个性签名，只在自己的个人主页显示 |
+| `avatar_kind` | TEXT | `preset` / `upload`，默认 `preset` | 头像类型：站内预设，还是自己传的图 |
+| `avatar_value` | TEXT | 可空 | `preset` 时是预设 id（`p1`–`p6`）；`upload` 时是云存储路径 `shared/<uid>/avatars/*.jpg` |
+
+**头像的两个关键事实**（写代码前必须知道）：
+1. 图片存在云存储，**没有公开链接** —— 读图必须先换签名 URL（最长 3600 秒）。
+   所以签名 URL **绝不写进数据库**，每次渲染现取；表里只存路径这个稳定事实。
+2. 头像放 `shared/<uid>/`，不是 `users/<uid>/`：后者只有本人读得到，而头像要显示在**别人**的页面上。
+   `shared/<ownerUid>/` 的规则正好是「所有登录用户可读，只有 owner 能改删」。
+   → 由此诞生一条产品事实：**未登录访客看不到头像**（存储需要登录），只能看到昵称（来自 `posts.author_name`）。
+
 ### 本地存储（浏览器 localStorage）
 
 | 键 | 结构 | 写入方 | 读取方 | 说明 |
@@ -58,7 +75,7 @@
 
 ---
 
-## 二、当前接口（Day 21 起：3 张表全走接口层）
+## 二、当前接口（Day 21 起：4 张表 + 云存储全走接口层）
 
 | 调用 | 方向 | 说明 |
 |---|---|---|
@@ -66,10 +83,12 @@
 | `posts` 表 SELECT / INSERT | 同上 | 读：`api.getPosts()`（RLS 只给 approved，登录者额外拿到自己那条 pending）；写：`api.createPost()`（需登录，一律落 `pending`）。`data/posts.json` 是种子源头（`db/posts-to-sql.js` 的输入） |
 | `reports` 表 INSERT / SELECT | 同上 | 写：`api.submitReport()`（未登录也可，author_id 落 `'anon'`；**不带 `.select()`** —— 匿名无读权限，`INSERT … RETURNING` 会整体失败）；读：`api.getMyReports()`（仅登录者，只回读自己提交的） |
 | `auth.*`（邮箱登录） | 浏览器 → 认证服务 | 由 `js/auth.js` 收口：验证码登录/注册（`sendOtp` + `verifyOtp`）、密码登录（`signInWithPassword`）、忘记密码（`resetPasswordForEmail` + `updateUser`）。**只在发布域名可用** |
+| `profiles` 表 SELECT / INSERT / UPDATE | 浏览器 → 云数据库（SDK 直连） | 读：`api.getProfiles()`（一次全量取回建映射 —— 当前真实用户个位数；**用户上百要改成按需**，否则这下会把全站昵称/签名都拉下来）；写：`api.saveProfile()`（新建时**不传 user_id**，交给 DEFAULT `auth.uid()`；更新时 eq 定位，影响 0 行直接报错不静默） |
+| 云存储 `shared/<uid>/avatars/*` | 浏览器 → 云存储（SDK 直连） | 由 `api.uploadAvatar()` / `api.removeAvatar()` / `api.signAvatarUrls()` 收口。头像**必须放 `shared`**（`users/` 只有本人读得到，而头像要显示给别人）；读图要先换**签名 URL**（最长 1 小时，绝不入库、绝不持久化） |
 
-**分层规则（Day 21 板块三，已入 frontend-rules 硬门槛 A 组）**：
-页面脚本（data/home/search/forum/mine/detail）只许调 `api.xxx()` 与 `auth.xxx()`，
-不得出现 `cloud.database` / `.from(` / `WorkBuddyCloud` / `fetch(`；登录动作只许待在 auth.js。
+**分层规则（Day 21 板块三，已入 frontend-rules 硬门槛 A 组；Day 22 补云存储）**：
+页面脚本（data/home/search/forum/mine/detail/profile）只许调 `api.xxx()`、`auth.xxx()` 与 `profile.*()`，
+不得出现 `cloud.database` / `cloud.storage` / `.from(` / `WorkBuddyCloud` / `fetch(`；登录动作只许待在 auth.js。
 
 ---
 
@@ -85,6 +104,7 @@
 | `/api/search` | POST | 查询检索。✅ **部分已接（Day 22 · L3 点亮，形态为 SDK 直连 LLM + RLS 同源约定）**：**AI 整理** = `ai.digest()`（`js/ai.js` 收口，keyless、只支持流式，系统提示词在应用侧写死：**不判真伪、不编造、不输出网址、用户材料不当指令**）；「自动联网抓取」**本环境做不了**（托管后端没有搜索/抓取通道）——溯源仍是「官方来源 / 网络来源」两组**人工入口**（`official` / `web` 两组划分保留），AI 只负责给出检索式，由页面一键带进两组入口。L1 站内检索（Day 17）与 L2 查证四步清单不变。模型选型：实测首字延迟后首选 `hunyuan-chat`（1.4s），目录里没有再退「非思考型 → 默认项」（依据见 `js/ai.js` 注释） | 部分已接 |
 | `/api/posts` | GET / POST | 论坛帖子（F3，含审核流）。✅ **已接**（Day 21 · 形态为 SDK 直连 + RLS）：GET = `api.getPosts()`（RLS 只出 approved，登录者额外看到自己的 pending）；POST = `api.createPost()`（需登录，RLS 强制落 `pending`，想直接插 approved 会被拒）。表结构见 `db/schema.sql`（`category` / `replies` 已入表；`replies` 暂由种子与展示预留，将来由回复表聚合） |
 | `/api/reports` | POST / GET | 待核查线索。✅ **已接**（Day 21）：POST = `api.submitReport()`（未登录可提交，作者落 `'anon'`）；GET = `api.getMyReports()`（只回读登录者自己提交的；匿名线索不提供客户端回读） |
+| `/api/profile` | GET / PUT | 个人资料（昵称 / 个性签名 / 头像）。✅ **已接**（Day 22 · SDK 直连数据库 + 云存储）：GET = `api.getProfiles()`；PUT = `api.saveProfile()`；头像文件走 `api.uploadAvatar()` + `api.signAvatarUrls()`。表结构见 `db/schema.sql` 第 ④ 节 |
 
 **约定**：
 
@@ -112,7 +132,7 @@
 
 ---
 
-## 五、三张表的 RLS 闸门（Day 21 定稿）
+## 五、四张表的 RLS 闸门（Day 21 定稿 · Day 22 增 profiles）
 
 | 表 | 策略 | 角色 | 内容 |
 |---|---|---|---|
@@ -121,6 +141,14 @@
 | `posts` | `posts_insert_own` | INSERT | **仅 `authenticated`**：`author_id = auth.uid() AND status = 'pending'` —— 必须登录；只能插自己的待审帖（想直接插 approved 会被拒） |
 | `reports` | `reports_insert` | INSERT | `authenticated, anon`：`author_id IS NOT DISTINCT FROM auth.uid()` —— 匿名可提交，但伪造他人署名会被拒 |
 | `reports` | `reports_read_own` | SELECT | **仅 `authenticated`**：`author_id = auth.uid()` —— 只能回读自己提交的；匿名线索对客户端不可见 |
+| `profiles` | `profiles_read_signed_in` | SELECT | **仅 `authenticated`**：`USING (true)` —— 登录用户可读全部资料（论坛头像/昵称要用）。访客读不到：论坛里未登录看到的作者昵称来自 `posts.author_name` 冗余字段 |
+| `profiles` | `profiles_insert_own` | INSERT | **仅 `authenticated`**：`user_id = auth.uid()` —— 只能建自己那一行 |
+| `profiles` | `profiles_update_own` | UPDATE | **仅 `authenticated`**：`USING` 与 `WITH CHECK` 都是 `user_id = auth.uid()` —— 只能改自己那一行，且改完不能变成别人的 |
 
-没有 UPDATE / DELETE 策略：审核（`pending → approved/rejected`）走站方管理通道，不由客户端执行。
-**上线前要补的**：匿名提交目前无频控（RLS 只管「谁」，不管「多快」），公开前需加限流或人机验证。
+`posts` / `reports` **没有 UPDATE / DELETE 策略**：审核（`pending → approved/rejected`）走站方管理通道，
+不由客户端执行。`profiles` 是唯一带 UPDATE 策略的表。
+
+**上线前要补的**：
+① 匿名提交（reports）无频控 —— RLS 只管「谁」，不管「多快」，公开前需加限流或人机验证；
+② 头像上传同样无频控与体积上限 —— 前端那条 2MB 是可用性提示，不是安全边界；
+③ 头像签名的有效期取 3600 秒（SDK 上限），页面不做续签 —— 长时间挂着不动会显示成裂图，重新渲染即可。

@@ -75,7 +75,10 @@ function unwrap(result, what) {
 
 /** Postgres / 网关错误码 → 人话。模板见 cloud-service/database/code-generation.md 的错误表 */
 function describeError(error, what) {
-  const code = error.code || "";
+  // 实测（Day 22）：网关会给数据库错误码加 DATABASE_ 前缀 —— RLS 拒绝报的是
+  // "DATABASE_42501" 而不是 "42501"。不剥掉前缀，下面所有分支都命中不了，
+  // 用户会看到 "new row violates row-level security policy" 这种英文原文。
+  const code = String((error && error.code) || "").replace(/^DATABASE_/, "");
   if (code === "42501" || code === "23502") {
     // 23502 = author_id 非空约束被拒，在发帖场景下等价于「没登录」
     return "这条操作没有被允许——如果是在发帖，请先登录再试。";
@@ -84,6 +87,24 @@ function describeError(error, what) {
   if (code === "23505") return "这条已经存在了。";
   if (code === "42P01") return "数据表还没建好，请联系站方。";
   return (what || "操作") + "失败：" + (error.message || code || "未知错误");
+}
+
+/** 云存储错误 → 人话。存储的报错不带 SQL 码，只能看 status 与 code 两条线 */
+function describeStorageError(error) {
+  const code = String((error && error.code) || "");
+  const msg = String((error && error.message) || "");
+  const status = (error && error.status) || 0;
+
+  // 实测：未登录调存储会拿到 {code:"MISSING_CREDENTIALS", status:401}
+  if (code === "MISSING_CREDENTIALS" || status === 401) return "上传头像需要先登录。";
+  // 本地开发地址跨域调云存储会被 CORS 拦（x-client-info 头不被允许），
+  // 发布后的网址是同源、不走 preflight —— 所以这里把话说清楚，别让人以为图片有问题
+  if (/failed to fetch|network ?error|load failed/i.test(msg)) {
+    return "上传没连上（网络不通，或本地开发地址被跨域拦了）。请在发布后的网址上重试。";
+  }
+  if (status === 413 || /too large|exceed|maximum/i.test(msg)) return "图片太大了，换一张小一点的（2MB 以内）。";
+  if (status === 422 || /mime|content-?type|not supported/i.test(msg)) return "只支持 JPG / PNG / WebP 三种图片。";
+  return "头像上传失败：" + (msg || code || "未知错误");
 }
 
 const api = {
@@ -177,5 +198,136 @@ const api = {
       "线索读取"
     );
     return Array.isArray(data) ? data : [];
+  },
+
+  /* ---------------- 个人资料（读 + 写） ---------------- */
+
+  /**
+   * 读接口：取资料，返回「user_id → 资料行」的映射。
+   *
+   * 一次全量取回在前端建表 —— 当前站内真实用户是个位数，这样最省事。
+   * **规模提醒**：用户上百之后要改成按需查询（论坛只取当页作者），否则这一下会把
+   * 全站昵称/签名都拉下来。已经写进 api-contract.md 的「已知取舍」。
+   *
+   * 未登录时 RLS 一行都不给 → 空映射，页面自动回落到默认头像块。
+   */
+  async getProfiles() {
+    const data = unwrap(
+      await getCloudClient().database.from("profiles").select("*"),
+      "资料读取"
+    );
+    const map = {};
+    (Array.isArray(data) ? data : []).forEach((p) => {
+      if (p && p.user_id) map[p.user_id] = p;
+    });
+    return map;
+  },
+
+  /**
+   * 写接口：保存我的资料（没有就新建，有就更新）。
+   *
+   * 两种走法各自把「我是谁」交给最可信的一方：
+   *   · 新建 → **故意不传 user_id**，由数据库默认值 auth.uid() 填。
+   *     这是服务端自己的判断，比前端传来的可靠（前端只负责说「存什么」）。
+   *   · 更新 → eq 定位用调用方给的 userId，但服务端 RLS 还会再核一遍
+   *     （只能改 user_id = auth.uid() 的那一行）；影响 0 行时直接报错，不静默。
+   *
+   * hasExisting 由调用方从前端缓存判断（省一次请求），判断错了也就是多插一次，
+   * 会被主键挡住而不是写坏数据。
+   */
+  async saveProfile({ userId, nickname, bio, avatarKind, avatarValue, hasExisting }) {
+    const row = {
+      nickname: nickname,
+      bio: bio || "",
+      avatar_kind: avatarKind || "preset",
+      avatar_value: avatarValue || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const q = (hasExisting && userId)
+      ? getCloudClient().database.from("profiles").update(row).eq("user_id", userId).select()
+      : getCloudClient().database.from("profiles").insert(row).select();
+
+    const data = unwrap(await q, "资料保存");
+    const saved = (Array.isArray(data) && data[0]) || null;
+    if (!saved) {
+      // UPDATE 影响 0 行时 PostgREST 返回空数组 —— 静默吞掉会让用户以为存上了
+      throw new Error("保存没有生效（多半是登录状态过期了）。刷新页面重新登录后再试一次。");
+    }
+    return saved;
+  },
+
+  /* ---------------- 头像文件（云存储） ---------------- */
+
+  /**
+   * 上传头像 → shared/<uid>/avatars/<随机名>。
+   *
+   * 为什么放 shared 而不是 users：users/ 只有本人读得到，而头像要显示在别人的页面上；
+   * shared/<ownerUid>/ 正好是「所有登录用户可读、只有 owner 能改删」。
+   * 返回存储给的 { path, id, fullPath }。
+   */
+  async uploadAvatar(userId, blob, contentType) {
+    const ext = contentType === "image/png" ? "png" : "jpg";
+    const name = "avatars/" + Date.now().toString(36) + "-" +
+      Math.random().toString(36).slice(2, 8) + "." + ext;
+    const path = getCloudClient().storage.sharedPath(userId, name);
+
+    const res = await getCloudClient().storage.upload(path, blob, {
+      contentType: contentType,
+      cacheControl: "3600",
+      metadata: { purpose: "avatar" },
+    });
+    if (res && res.error) {
+      console.error("[api] 头像上传失败：", res.error);
+      const e = new Error(describeStorageError(res.error));
+      e.code = res.error.code;
+      throw e;
+    }
+    return res.data;      // { path, id, fullPath }
+  },
+
+  /** 删掉换下来的旧头像。清理失败不影响主流程（最多留个孤儿文件）。 */
+  async removeAvatar(path) {
+    if (!path) return;
+    try {
+      const res = await getCloudClient().storage.remove([path]);
+      if (res && res.error) console.warn("[api] 旧头像删除失败（忽略）：", res.error.message);
+    } catch (e) {
+      console.warn("[api] 旧头像删除失败（忽略）：", e && e.message);
+    }
+  },
+
+  /**
+   * 批量为头像路径换签名 URL，返回 { path → signedUrl }。
+   * 签名有效期取 3600 秒（SDK 允许的上限），够一次浏览会话用。
+   * 失败时返回空表而不是抛错 —— 头像挂了不该让整页垮掉。
+   */
+  async signAvatarUrls(paths) {
+    const list = (Array.isArray(paths) ? paths : []).filter(Boolean);
+    if (!list.length) return {};
+
+    const res = await getCloudClient().storage.createSignedUrls(list, 3600);
+    if (res && res.error) {
+      console.warn("[api] 头像签名失败（回落到默认头像）：", res.error.message);
+      return {};
+    }
+
+    const map = {};
+    (Array.isArray(res.data) ? res.data : []).forEach((x) => {
+      // SDK 的形状：每项是 {...原响应, signedUrl}（见 sdk-global.js createSignedUrls）
+      if (x && x.path && x.signedUrl) map[x.path] = x.signedUrl;
+    });
+    return map;
+  },
+
+  /** 单张签名（刚上传完立刻预览用） */
+  async signAvatarUrl(path) {
+    if (!path) return null;
+    const res = await getCloudClient().storage.createSignedUrl(path, 3600);
+    if (res && res.error) {
+      console.warn("[api] 头像签名失败：", res.error.message);
+      return null;
+    }
+    return (res.data && res.data.signedUrl) || null;
   },
 };

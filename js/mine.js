@@ -175,6 +175,278 @@ function renderAccount() {
   });
 }
 
+/* ---------------- ⓪b 我的资料（Day 22：昵称 / 个性签名 / 头像） ----------------
+
+   三样东西各自存在哪，界面上得说清楚，别让人误以为都跟着账号走：
+     昵称 / 签名 / 头像的选择 → 云库 profiles 表（换设备也在）
+     头像图片本身            → 云存储 shared/<uid>/avatars/（签名后才能读）
+   昵称会显示在帖子上；头像会出现在论坛列表里 —— 所以这是**公开**信息，
+   界面上明确提醒「别填真名」。个性签名只在本页显示。 */
+
+let pfFile = null;                              // 刚选、还没上传的头像（裁剪后的 Blob）
+let pfBlobUrl = null;                           // 本地预览用的临时 URL
+let pfChoice = { kind: null, value: null };     // 当前头像选择：preset（站内默认）或 upload（自己的）
+
+function pfSay(html, ok) {
+  const note = document.getElementById("pf-note");
+  if (!note) return;
+  note.innerHTML = html;
+  note.classList.toggle("note-ok", ok === true);
+  note.classList.toggle("note-warn", ok === false);
+}
+
+/** 当前昵称输入框里的值（预览要用它挑默认配色） */
+function pfNickname() {
+  const el = document.getElementById("pf-nickname");
+  return el ? el.value.trim() : "";
+}
+
+/** 头像预览内容：本地新图 > 已上传图 > 预设块 */
+function pfPreviewHtml() {
+  if (pfBlobUrl) {
+    return '<span class="fx-avatar fx-avatar-lg"><img src="' + escHtml(pfBlobUrl) + '" alt="新头像预览"></span>';
+  }
+  if (pfChoice.kind === "upload" && pfChoice.value) {
+    const u = avatarUrlOf(pfChoice.value);
+    if (u) return '<span class="fx-avatar fx-avatar-lg"><img src="' + escHtml(u) + '" alt="当前头像"></span>';
+  }
+  const preset = presetOf(pfChoice.value) || defaultPreset(pfNickname() || "匿");
+  return '<span class="fx-avatar fx-avatar-lg" aria-hidden="true" style="background:' +
+    preset.bg + ";color:" + preset.fg + '">' + escHtml(String(preset.word || "匿")) + "</span>";
+}
+
+function paintProfilePreview() {
+  const el = document.getElementById("pf-preview");
+  if (el) el.innerHTML = pfPreviewHtml();
+}
+
+/** 预设按钮高亮：没选过就不高亮 —— 默认块只是兜底，不代表「已选中」 */
+function paintPresetChoice() {
+  document.querySelectorAll("#pf-presets .pf-preset").forEach((b) => {
+    const on = pfChoice.kind === "preset" && b.dataset.preset === pfChoice.value;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+/**
+ * 把选中的图居中裁成正方形再缩到 256。
+ * 头像位置的宽高是固定的，不裁的话非方图会被拉变形。
+ * （canvas 的 #ffffff 是画布填充，不是页面样式色值，与 C4 色值纪律无关；
+ *   不填白的话，带透明的 PNG 转 JPEG 后透明区会变成黑色。）
+ */
+function cropToSquare(file, size) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        const side = Math.min(img.width, img.height);
+        const sx = (img.width - side) / 2;
+        const sy = (img.height - side) / 2;
+        const cv = document.createElement("canvas");
+        cv.width = size;
+        cv.height = size;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, size, size);
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        cv.toBlob((blob) => {
+          URL.revokeObjectURL(url);
+          if (blob) resolve(blob);
+          else reject(new Error("图片处理失败，换一张试试。"));
+        }, "image/jpeg", 0.82);
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        reject(new Error("图片处理失败，换一张试试。"));
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("这张图读不出来，换一张试试。"));
+    };
+    img.src = url;
+  });
+}
+
+/** 渲染资料区：未登录只给登录出口；登录后给完整表单 */
+function renderProfile() {
+  const box = document.getElementById("profile-body");
+  if (!box) return;
+
+  if (!auth.isSignedIn()) {
+    pfFile = null;
+    if (pfBlobUrl) { URL.revokeObjectURL(pfBlobUrl); pfBlobUrl = null; }
+    box.innerHTML =
+      '<p class="mine-about">登录后可以设置昵称、个性签名和头像。' +
+      '昵称会显示在你发的帖子上，头像会出现在论坛里——<b>别人也看得到</b>，别填真名。</p>' +
+      '<button type="button" class="empty-jump" id="profile-signin">登录 / 注册</button>';
+    const btn = document.getElementById("profile-signin");
+    if (btn) btn.addEventListener("click", () => {
+      auth.openLogin("登录后可以设置昵称、签名和头像。");
+    });
+    return;
+  }
+
+  const row = myProfile() || {};
+  pfChoice = {
+    kind: row.avatar_kind === "upload" && row.avatar_value ? "upload" : (row.avatar_value ? "preset" : null),
+    value: row.avatar_value || null,
+  };
+
+  box.innerHTML =
+    '<div class="pf-top">' +
+      '<div class="pf-preview" id="pf-preview">' + pfPreviewHtml() + "</div>" +
+      '<div class="pf-fields">' +
+        '<label class="compose-label" for="pf-nickname">昵称（显示在你发的帖子上）</label>' +
+        '<input type="text" id="pf-nickname" class="compose-input" maxlength="20" ' +
+          'placeholder="如「夜航船」" value="' + escHtml(row.nickname || "") + '">' +
+        '<label class="compose-label" for="pf-bio">个性签名（80 字以内，只在你这个页面显示）</label>' +
+        '<input type="text" id="pf-bio" class="compose-input" maxlength="80" ' +
+          'placeholder="一句话说清你关心什么" value="' + escHtml(row.bio || "") + '">' +
+      "</div>" +
+    "</div>" +
+    '<p class="compose-label">或者从站内默认头像里挑一个</p>' +
+    '<div class="pf-presets" id="pf-presets" role="group" aria-label="选择默认头像">' +
+      PRESET_AVATARS.map((p) =>
+        '<button type="button" class="fx-avatar pf-preset" data-preset="' + p.id + '" ' +
+        'aria-pressed="false" title="' + p.word + '" style="background:' + p.bg + ";color:" + p.fg + '">' +
+        p.word + "</button>").join("") +
+    "</div>" +
+    '<p class="compose-label">也可以传一张自己的：JPG / PNG / WebP，2MB 以内（会自动裁成正方形）</p>' +
+    '<input type="file" id="pf-file" class="pf-file" accept="image/png,image/jpeg,image/webp">' +
+    '<p class="compose-note" id="pf-note" role="status"></p>' +
+    '<button type="button" class="empty-jump" id="pf-save">保存资料</button>';
+
+  paintPresetChoice();
+  bindProfileForm();
+}
+
+/** 资料表单事件绑定（表单是动态生成的，每次渲染后重绑） */
+function bindProfileForm() {
+  const presets = document.getElementById("pf-presets");
+  if (presets) {
+    presets.addEventListener("click", (e) => {
+      const b = e.target.closest(".pf-preset");
+      if (!b) return;
+      pfChoice = { kind: "preset", value: b.dataset.preset };
+      pfFile = null;
+      if (pfBlobUrl) { URL.revokeObjectURL(pfBlobUrl); pfBlobUrl = null; }
+      const f = document.getElementById("pf-file");
+      if (f) f.value = "";
+      paintProfilePreview();
+      paintPresetChoice();
+      pfSay("已选默认头像，点「保存资料」生效。", true);
+    });
+  }
+
+  const fileEl = document.getElementById("pf-file");
+  if (fileEl) {
+    fileEl.addEventListener("change", async () => {
+      const f = fileEl.files && fileEl.files[0];
+      if (!f) return;
+      if (!/^image\/(png|jpeg|webp)$/.test(f.type)) {
+        pfSay("只支持 JPG / PNG / WebP 三种图片。", false);
+        fileEl.value = "";
+        return;
+      }
+      if (f.size > 2 * 1024 * 1024) {
+        pfSay("图片太大了，2MB 以内。", false);
+        fileEl.value = "";
+        return;
+      }
+
+      pfSay("正在处理图片…", true);
+      try {
+        const blob = await cropToSquare(f, 256);
+        if (pfBlobUrl) URL.revokeObjectURL(pfBlobUrl);
+        pfFile = blob;
+        pfBlobUrl = URL.createObjectURL(blob);
+        paintProfilePreview();
+        pfSay("新头像已就绪，点「保存资料」生效。", true);
+      } catch (err) {
+        pfFile = null;
+        pfSay(escHtml(err.message || "图片处理失败。"), false);
+      }
+    });
+  }
+
+  const save = document.getElementById("pf-save");
+  if (save) save.addEventListener("click", saveProfileForm);
+}
+
+/** 保存资料：填了新图先上传，再写库；成功后整体刷新 */
+async function saveProfileForm() {
+  const nameEl = document.getElementById("pf-nickname");
+  const bioEl = document.getElementById("pf-bio");
+  const btn = document.getElementById("pf-save");
+  const nick = nameEl ? nameEl.value.trim() : "";
+  const bio = bioEl ? bioEl.value.trim() : "";
+
+  // 长度规则与数据库 CHECK 一致（1–20 / 0–80），前端拦一道只为早提示
+  if (!nick) { pfSay("填一个昵称吧，它会显示在你发的帖子上。", false); if (nameEl) nameEl.focus(); return; }
+  if (nick.length > 20) { pfSay("昵称 20 字以内。", false); return; }
+  if (bio.length > 80) { pfSay("签名 80 字以内。", false); return; }
+
+  const idle = btn ? btn.textContent : "保存资料";
+  if (btn) { btn.disabled = true; btn.textContent = "保存中…"; }
+  pfSay("");
+
+  const uid = auth.uid();
+  const before = myProfile() || {};
+  let kind = pfChoice.kind || "preset";
+  let value = pfChoice.value || null;
+
+  try {
+    if (!uid) throw new Error("登录状态已失效，请重新登录后再保存。");
+
+    // ① 换了新图：先传云存储，成功后再把路径写进资料（路径就是「已上传」的凭证）
+    if (pfFile) {
+      const up = await api.uploadAvatar(uid, pfFile, pfFile.type);
+      const path = (up && up.path) || null;
+      if (!path) throw new Error("上传没有返回文件路径，请重试。");
+      kind = "upload";
+      value = path;
+
+      const signed = await api.signAvatarUrl(path);
+      if (signed) cacheAvatarUrl(path, signed);
+
+      // 旧图也是上传的、且确实换掉了 → 清掉，别在存储里留孤儿文件
+      if (before.avatar_kind === "upload" && before.avatar_value && before.avatar_value !== path) {
+        await api.removeAvatar(before.avatar_value);
+      }
+    }
+
+    // ② 写资料行（hasExisting 来自缓存：已有行则更新，否则新建）
+    await api.saveProfile({
+      userId: uid,
+      nickname: nick,
+      bio: bio,
+      avatarKind: kind,
+      avatarValue: value,
+      hasExisting: !!before.user_id,
+    });
+
+    pfFile = null;
+    if (pfBlobUrl) { URL.revokeObjectURL(pfBlobUrl); pfBlobUrl = null; }
+    resetProfileCache();          // 资料变了，缓存整体作废
+    await ensureProfiles();
+    renderProfile();
+    pfSay("已保存。昵称与头像会显示在你发的帖子上。", true);
+  } catch (err) {
+    console.error("[mine] 资料保存失败：", err);
+    pfSay(escHtml(err.message || "保存失败，请重试。"), false);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = idle; }
+  }
+}
+
+/** 首屏：先取回资料再渲染（否则会先闪一下空表单） */
+async function initProfile() {
+  await ensureProfiles();
+  renderProfile();
+}
+
 /* ---------------- ③ 我提交的待核查（写云库；未登录时本机留底） ---------------- */
 
 let MY_REPORTS = [];        // 登录时从云端取回的线索
@@ -336,10 +608,13 @@ initReports();
 renderAccount();
 renderReports();
 initData();
+initProfile();
 
-// 登录 / 退出后：账号区与线索区一起刷新（线索的来源会跟着变）
+// 登录 / 退出后：账号区、资料区、线索区一起刷新（线索来源与头像都要跟着变）
 auth.onChange(async () => {
+  resetProfileCache();   // 换人了：上一个账号的资料与签名 URL 一律作废
   renderAccount();
+  await initProfile();
   await refreshReports();
 });
 refreshReports();
