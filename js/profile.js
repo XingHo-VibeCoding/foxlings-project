@@ -168,11 +168,12 @@ function paintAvatarInto(el, uid, name) {
   el.style.color = preset.fg;
 }
 
-/** 页头入口重绘：未登录回落站标；登录后取资料画自己的头像与昵称 */
+/** 页头入口重绘：未登录回落站标；登录后取资料画自己的头像与昵称；管理员点亮「后台」 */
 async function refreshHeaderMe() {
   const host = document.getElementById("header-me");
   const btn = document.getElementById("header-avatar");
   const nameEl = document.getElementById("header-me-name");
+  const adminEl = document.getElementById("header-admin");
   if (!host || !btn) return;       // 该页面没有这个结构，安静退出
 
   if (!auth.isSignedIn()) {
@@ -180,6 +181,7 @@ async function refreshHeaderMe() {
     btn.style.background = "";
     btn.style.color = "";
     if (nameEl) { nameEl.textContent = ""; nameEl.hidden = true; }
+    if (adminEl) adminEl.hidden = true;
     host.setAttribute("title", "个人主页");
     host.setAttribute("aria-label", "进入个人主页");
     return;
@@ -194,6 +196,12 @@ async function refreshHeaderMe() {
   if (nameEl) { nameEl.textContent = nick; nameEl.hidden = !nick; }
   host.setAttribute("title", (nick ? nick + " · " : "") + "个人主页");
   host.setAttribute("aria-label", "进入个人主页" + (nick ? "（" + nick + "）" : ""));
+
+  // 「后台」入口：显隐完全跟着服务端的判定走（查 admins 表，前端伪造不了）
+  if (adminEl) {
+    try { adminEl.hidden = !(await auth.isAdmin()); }
+    catch (e) { adminEl.hidden = true; }
+  }
 }
 
 /* 启动：先按未登录画一次，等身份层恢复会话后再重画一遍 */

@@ -140,6 +140,26 @@ CREATE TABLE profiles (
 
 COMMENT ON TABLE profiles IS '用户资料：昵称与头像公开显示在论坛帖子上；签名只在个人主页。头像文件在云存储 shared/<uid>/avatars/，本表只存路径';
 
+-- ---------------------------------------------------------------------------
+-- ⑤ admins —— 管理员名单（Day 23）
+--    名单本身无任何写策略：加/撤管理员走站方管理通道，客户端改不了。
+--    各表 *_admin_* 策略用 EXISTS 子查询认它，权限真身在这里，前端只是入口。
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS admins (
+  user_id     TEXT PRIMARY KEY,
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+
+-- 本人只能确认「我是不是管理员」，读不到名单全表
+CREATE POLICY admins_read_self ON admins
+  FOR SELECT TO authenticated
+  USING (user_id = auth.uid());
+
+COMMENT ON TABLE admins IS '管理员名单：各表 *_admin_* 策略经 EXISTS 认它；无写策略，加人走站方通道';
+
 COMMIT;
 
 -- ============================================================================

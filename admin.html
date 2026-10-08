@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理后台 · 热门时事真伪辨别</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container brand-row">
+      <h1 class="brand">
+        <a class="brand-link" href="index.html#/board">
+          <span class="brand-logo" aria-hidden="true">真</span>
+          <span class="brand-name">热门时事真伪辨别</span>
+        </a>
+      </h1>
+      <a class="avatar-btn" href="index.html#/board" aria-label="返回首页">创</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <nav class="breadcrumb" aria-label="面包屑">
+      <a href="index.html">首页</a>
+      <span class="crumb-sep" aria-hidden="true">›</span>
+      <span aria-current="page">管理后台</span>
+    </nav>
+
+    <div class="view-head">
+      <div>
+        <h2 class="view-title">管理后台</h2>
+        <p class="view-sub">审核与清理只在这里做；权限由数据库核对，页面藏得再好也只是入口</p>
+      </div>
+    </div>
+
+    <!-- 闸门：未登录 / 非管理员都停在这里。真正的权限核对在数据库（RLS），不是这个 div -->
+    <section class="mine-card" id="admin-gate">
+      <div id="admin-gate-body"></div>
+    </section>
+
+    <div id="admin-body" hidden>
+      <!-- ① 待审帖子：通过 / 拒绝（拒绝可填理由，会展示给作者） -->
+      <section class="mine-card">
+        <h2>待审帖子 <span class="mine-count" id="pend-count"></span></h2>
+        <p class="mine-about">通过 = 进公开列表；拒绝 = 作者还能在自己那边看到被拒原因。两边都不做删除，删是另一档操作。</p>
+        <div id="pend-list" class="admin-list"></div>
+      </section>
+
+      <!-- ② 全部帖子：已通过可下架（回待审）/ 删除；已拒绝可放回待审 -->
+      <section class="mine-card">
+        <h2>全部帖子 <span class="mine-count" id="posts-count"></span></h2>
+        <input type="search" id="post-search" class="filter-search"
+               placeholder="按标题 / 发起人筛选…" aria-label="筛选帖子">
+        <div id="all-posts-list" class="admin-list"></div>
+      </section>
+
+      <!-- ③ 榜单条目：删除（删错可从种子重灌，data/data.json 是底稿） -->
+      <section class="mine-card">
+        <h2>辟谣榜条目 <span class="mine-count" id="items-count"></span></h2>
+        <input type="search" id="item-search" class="filter-search"
+               placeholder="按标题筛选…" aria-label="筛选榜单条目">
+        <div id="items-list" class="admin-list"></div>
+      </section>
+
+      <!-- ④ 线索收件箱：普通用户只能看自己的，这里能看全部；核查完可清 -->
+      <section class="mine-card">
+        <h2>线索收件箱 <span class="mine-count" id="reports-count"></span></h2>
+        <div id="reports-list" class="admin-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>本站是帮助用户自查的辅助工具，不是下结论的判官 · 数据人工整理 · 每条信源可点开验证</p>
+    </div>
+  </footer>
+
+  <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式） -->
+  <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+  <!-- 公开配置 → 数据接口层 → 页面数据层 → 身份层 → 管理页脚本，顺序不能换 -->
+  <script src="js/cloud-config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

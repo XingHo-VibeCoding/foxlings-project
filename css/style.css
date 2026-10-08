@@ -135,6 +135,15 @@ body {
   .header-me-name { display: none; }
 }
 
+/* 页头「后台」小链接：默认 hidden，只有管理员登录后由 profile.js 点亮。
+   注意不写 display —— 会压掉 [hidden] 的 UA 样式，元素就藏不住了 */
+.header-admin {
+  font-size: 13px; color: var(--c-muted); text-decoration: none;
+  padding: 8px 12px; border: 1px solid var(--c-line); border-radius: 10px;
+  vertical-align: middle;
+}
+.header-admin:hover { color: var(--c-primary); border-color: var(--c-primary); }
+
 /* 手机：品牌 + 头像一行，导航整行落到第二行（避免 360px 下挤爆） */
 @media (max-width: 640px) {
   .nav-tabs { order: 3; width: 100%; justify-content: space-between; }
@@ -719,6 +728,29 @@ body {
 .footer-links { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .footer-links a { color: var(--c-primary); text-decoration: none; font-size: 12px; }
 .footer-links a:hover { text-decoration: underline; }
+
+/* ---------- 管理后台（Day 23）：行式列表 + 两击确认的删除按钮 ---------- */
+.admin-list { display: flex; flex-direction: column; gap: 10px; }
+.admin-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 10px 14px; border: 1px solid var(--c-line); border-radius: 10px;
+  background: var(--c-white);
+}
+.admin-row-title { font-weight: 600; font-size: 14px; color: var(--c-text); }
+.admin-row-quote { font-weight: normal; max-width: 100%; }
+.admin-row-meta { font-size: 12px; color: var(--c-muted); }
+.admin-row-body { width: 100%; font-size: 13px; color: var(--c-text); margin: 0; }
+.admin-row-actions { margin-left: auto; display: flex; gap: 8px; }
+.admin-btn-ghost,
+.admin-btn-danger {
+  font-size: 13px; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--c-line); background: transparent; color: var(--c-text);
+}
+.admin-btn-danger { color: var(--c-fake-deep); border-color: var(--c-fake-soft); }
+.admin-btn-danger:hover,
+.admin-btn-danger.btn-armed { background: var(--c-fake-deep); color: var(--c-white); }
+.admin-reject-row { width: 100%; display: flex; gap: 8px; }
+.admin-reject-row .compose-input { flex: 1; min-width: 0; }
 
 /* ---------- 动画 ---------- */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }

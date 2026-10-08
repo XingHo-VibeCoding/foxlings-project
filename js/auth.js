@@ -26,6 +26,7 @@
 const AUTH_EMAIL_KEY = "fx_last_email";   // 上次填的邮箱（便利性，不是凭证）
 
 let __session = null;        // 当前会话；null = 未登录
+let __adminCache = null;     // 管理员判定缓存：null = 没查过 / true / false
 const __listeners = [];      // 会话变化订阅者（页面靠它刷新界面）
 let __pendingOtp = null;     // 待验证的挑战：{ email, verificationId, isExistingUser }
 let __requireResolve = null; // auth.require() 挂起的 Promise 的 resolve
@@ -66,6 +67,22 @@ const auth = {
   /** 当前用户标识（只用于界面判断，权限永远由数据库 RLS 决定） */
   uid() { return __session && __session.user ? __session.user.id : null; },
 
+  /**
+   * 我是不是管理员（Day 23）。
+   * 判定权在服务端：api.amIAdmin() 查 admins 表，RLS 保证非管理员/未登录
+   * 永远拿不到行 —— 空 = 否。这里只做缓存与会话切换时的失效，不做任何本地判定。
+   */
+  async isAdmin() {
+    if (!this.isSignedIn()) return false;
+    if (__adminCache !== null) return __adminCache;
+    try {
+      __adminCache = await api.amIAdmin();
+    } catch (e) {
+      __adminCache = false;         // 查询失败按「不是」处理，不因报错放大权限
+    }
+    return __adminCache;
+  },
+
   /** 订阅会话变化；返回取消订阅函数 */
   onChange(fn) {
     __listeners.push(fn);
@@ -88,6 +105,7 @@ const auth = {
     try {
       getCloudClient().auth.onAuthStateChange((event, session) => {
         __session = session || null;
+        __adminCache = null;          // 换人会话：管理员判定必须重新查
         __listeners.forEach((fn) => fn(__session, event));
       });
     } catch (e) {
@@ -173,6 +191,7 @@ const auth = {
       console.warn("[auth] 退出时出错（本地状态照常清空）：", e && e.message);
     }
     __session = null;
+    __adminCache = null;
     __listeners.forEach((fn) => fn(null, "SIGNED_OUT"));
   },
 

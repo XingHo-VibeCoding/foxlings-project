@@ -330,4 +330,78 @@ const api = {
     }
     return (res.data && res.data.signedUrl) || null;
   },
+
+  /* ---------------- 管理侧（Day 23） ----------------
+     权限全部在服务端：六条 *_admin_* RLS 策略只认 admins 表里的人，
+     前端这里的每个方法都只是「入口」，非管理员调用会被 RLS 拒掉。 */
+
+  /** 我是不是管理员：RLS 保证非管理员/未登录读 admins 永远是空 —— 空即否 */
+  async amIAdmin() {
+    const data = unwrap(
+      await getCloudClient().database.from("admins").select("user_id").limit(1),
+      "管理员校验"
+    );
+    return Array.isArray(data) && data.length > 0;
+  },
+
+  /** 管理员读全部帖子（含待审/已拒）—— 普通用户的 RLS 只给 approved 或自己的 */
+  async listAllPosts() {
+    const data = unwrap(
+      await getCloudClient().database.from("posts")
+        .select("*").order("created_at", { ascending: false }),
+      "帖子读取"
+    );
+    return Array.isArray(data) ? data : [];
+  },
+
+  /** 审核：status 只认 approved / rejected / pending（pending 用于「撤回下架」） */
+  async setPostStatus(id, status, rejectNote) {
+    if (["approved", "rejected", "pending"].indexOf(status) === -1) {
+      throw new Error("不合法的审核状态。");
+    }
+    const patch = { status: status, updated_at: new Date().toISOString() };
+    if (status === "rejected") patch.reject_note = rejectNote || "";
+    if (status === "approved") patch.reject_note = "";   // 过审顺手清掉旧理由
+
+    unwrap(
+      await getCloudClient().database.from("posts").update(patch).eq("id", id),
+      "帖子审核"
+    );
+    return true;
+  },
+
+  async deletePost(id) {
+    unwrap(
+      await getCloudClient().database.from("posts").delete().eq("id", id),
+      "帖子删除"
+    );
+    return true;
+  },
+
+  /** 管理员读全部线索（普通登录用户只能回读自己的，RLS 定的） */
+  async listAllReports() {
+    const data = unwrap(
+      await getCloudClient().database.from("reports")
+        .select("*").order("created_at", { ascending: false }),
+      "线索读取"
+    );
+    return Array.isArray(data) ? data : [];
+  },
+
+  async deleteReport(id) {
+    unwrap(
+      await getCloudClient().database.from("reports").delete().eq("id", id),
+      "线索删除"
+    );
+    return true;
+  },
+
+  /** 榜单条目删除（删错可从 data/data.json 重新灌回，数据有种子兜底） */
+  async deleteItem(id) {
+    unwrap(
+      await getCloudClient().database.from("items").delete().eq("id", id),
+      "条目删除"
+    );
+    return true;
+  },
 };

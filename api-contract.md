@@ -57,6 +57,18 @@
 1. 图片存在云存储，**没有公开链接** —— 读图必须先换签名 URL（最长 3600 秒）。
    所以签名 URL **绝不写进数据库**，每次渲染现取；表里只存路径这个稳定事实。
 2. 头像放 `shared/<uid>/`，不是 `users/<uid>/`：后者只有本人读得到，而头像要显示在**别人**的页面上。
+
+### admins（管理员名单，存于云库 `admins` 表 · Day 23）
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `user_id` | TEXT | 主键 | 与 auth.uid() 对上即拥有后台六项管理权限（经各表 `*_admin_*` 策略生效） |
+| `note` | TEXT | 默认 `''` | 备注（如「站长」），纯人读 |
+| `created_at` | TIMESTAMPTZ | 默认 now() | 加名单时间 |
+
+**两条铁律**：① 名单本身无写策略 —— 加/撤管理员走站方管理通道（SQL），
+任何客户端都改不了，包括管理员本人；② `admins_read_self` 只让本人读到自己那行，
+所以前端 `api.amIAdmin()` 的「空结果 = 否」是可靠的，不存在靠列表推断权限的口子。
    `shared/<ownerUid>/` 的规则正好是「所有登录用户可读，只有 owner 能改删」。
    → 由此诞生一条产品事实：**未登录访客看不到头像**（存储需要登录），只能看到昵称（来自 `posts.author_name`）。
 
@@ -105,6 +117,7 @@
 | `/api/posts` | GET / POST | 论坛帖子（F3，含审核流）。✅ **已接**（Day 21 · 形态为 SDK 直连 + RLS）：GET = `api.getPosts()`（RLS 只出 approved，登录者额外看到自己的 pending）；POST = `api.createPost()`（需登录，RLS 强制落 `pending`，想直接插 approved 会被拒）。表结构见 `db/schema.sql`（`category` / `replies` 已入表；`replies` 暂由种子与展示预留，将来由回复表聚合） |
 | `/api/reports` | POST / GET | 待核查线索。✅ **已接**（Day 21）：POST = `api.submitReport()`（未登录可提交，作者落 `'anon'`）；GET = `api.getMyReports()`（只回读登录者自己提交的；匿名线索不提供客户端回读） |
 | `/api/profile` | GET / PUT | 个人资料（昵称 / 个性签名 / 头像）。✅ **已接**（Day 22 · SDK 直连数据库 + 云存储）：GET = `api.getProfiles()`；PUT = `api.saveProfile()`；头像文件走 `api.uploadAvatar()` + `api.signAvatarUrls()`。表结构见 `db/schema.sql` 第 ④ 节 |
+| `/api/admin` | 多个 | **管理后台（Day 23 新增，仅 `admins` 表成员）**：`api.amIAdmin()`（判定，RLS 空 = 否）；`api.listAllPosts()`（含待审/已拒）；`api.setPostStatus(id, status, rejectNote)`（审核：approved / rejected / pending）；`api.deletePost(id)`；`api.listAllReports()`（全部线索）；`api.deleteReport(id)`；`api.deleteItem(id)`（榜单条目）。页面 `admin.html` + `js/admin.js`；危险操作两击确认。**每个写请求都被 `*_admin_*` RLS 策略再核一遍**，非管理员调用一律被数据库拒绝 |
 
 **约定**：
 
@@ -132,21 +145,26 @@
 
 ---
 
-## 五、四张表的 RLS 闸门（Day 21 定稿 · Day 22 增 profiles）
+## 五、五张表的 RLS 闸门（Day 21 定稿 · Day 22 增 profiles · Day 23 增 admins 与管理策略）
 
 | 表 | 策略 | 角色 | 内容 |
 |---|---|---|---|
-| `items` | `items_read_all` | SELECT | `authenticated, anon`：`USING (true)` —— 公开只读，无任何写策略（站方经管理通道维护） |
+| `items` | `items_read_all` | SELECT | `authenticated, anon`：`USING (true)` —— 公开只读；写侧只有管理员的 DELETE |
+| `items` | `items_admin_delete` | DELETE | **仅 `authenticated` 且在 `admins` 表** —— 榜单条目由后台删除（种子在 data.json 可重灌） |
 | `posts` | `posts_read` | SELECT | `authenticated, anon`：`status = 'approved' OR author_id = auth.uid()` —— 公开出已通过的；作者额外看到自己那条待审 |
 | `posts` | `posts_insert_own` | INSERT | **仅 `authenticated`**：`author_id = auth.uid() AND status = 'pending'` —— 必须登录；只能插自己的待审帖（想直接插 approved 会被拒） |
+| `posts` | `posts_admin_read / _update / _delete` | SELECT/UPDATE/DELETE | **仅 `authenticated` 且在 `admins` 表**：后台读全部（含待审）、审核改状态、删帖。UPDATE 的 WITH CHECK 同样要求管理员 |
 | `reports` | `reports_insert` | INSERT | `authenticated, anon`：`author_id IS NOT DISTINCT FROM auth.uid()` —— 匿名可提交，但伪造他人署名会被拒 |
 | `reports` | `reports_read_own` | SELECT | **仅 `authenticated`**：`author_id = auth.uid()` —— 只能回读自己提交的；匿名线索对客户端不可见 |
+| `reports` | `reports_admin_read / _delete` | SELECT/DELETE | **仅 `authenticated` 且在 `admins` 表** —— 后台线索收件箱（读全部 + 核查完可清） |
 | `profiles` | `profiles_read_signed_in` | SELECT | **仅 `authenticated`**：`USING (true)` —— 登录用户可读全部资料（论坛头像/昵称要用）。访客读不到：论坛里未登录看到的作者昵称来自 `posts.author_name` 冗余字段 |
 | `profiles` | `profiles_insert_own` | INSERT | **仅 `authenticated`**：`user_id = auth.uid()` —— 只能建自己那一行 |
 | `profiles` | `profiles_update_own` | UPDATE | **仅 `authenticated`**：`USING` 与 `WITH CHECK` 都是 `user_id = auth.uid()` —— 只能改自己那一行，且改完不能变成别人的 |
+| `admins` | `admins_read_self` | SELECT | **仅 `authenticated`**：`user_id = auth.uid()` —— 本人只能确认「我是不是管理员」，读不到名单全表；无任何写策略（加人走站方管理通道） |
 
-`posts` / `reports` **没有 UPDATE / DELETE 策略**：审核（`pending → approved/rejected`）走站方管理通道，
-不由客户端执行。`profiles` 是唯一带 UPDATE 策略的表。
+所有管理策略的判定式都是同一个：`EXISTS (SELECT 1 FROM public.admins a WHERE a.user_id = auth.uid())`
+—— 权限真身在数据库里，前端页面只是入口，改前端解锁不了任何操作。
+`admins` 表本身无写策略：加/撤管理员走站方管理通道，客户端（包括管理员本人）改不了名单。
 
 **上线前要补的**：
 ① 匿名提交（reports）无频控 —— RLS 只管「谁」，不管「多快」，公开前需加限流或人机验证；

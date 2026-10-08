@@ -111,6 +111,7 @@ const pages = {
   index: fs.readFileSync(ROOT + '/index.html', 'utf8'),
   detail: fs.readFileSync(ROOT + '/detail.html', 'utf8'),
   mine: fs.readFileSync(ROOT + '/mine.html', 'utf8'),
+  admin: fs.readFileSync(ROOT + '/admin.html', 'utf8'),
 };
 
 // 取出 :root 里成对的变量名 → 色值
@@ -634,7 +635,7 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
      「分层」在本项目的含义：页面只认 api.xxx() 与 auth.xxx()，
      谁直接摸 SDK / 数据库 / 本地 json，谁就是在给下一次换数据源埋雷。
      扫的是源码不是运行时 —— 运行时盯不住「哪一层写的这行代码」。 */
-  const PAGE_SCRIPTS = ['js/data.js', 'js/home.js', 'js/search.js', 'js/forum.js', 'js/mine.js', 'js/detail.js', 'js/profile.js'];
+  const PAGE_SCRIPTS = ['js/data.js', 'js/home.js', 'js/search.js', 'js/forum.js', 'js/mine.js', 'js/detail.js', 'js/profile.js', 'js/admin.js'];
   const readSrc = (f) => { try { return fs.readFileSync(ROOT + '/' + f, 'utf8'); } catch (e) { return ''; } };
 
   // Day 22：云存储也归「数据源」—— 页面不许自己 upload / createSignedUrls
@@ -680,13 +681,15 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     'js/forum.js': 'index.html',
     'js/mine.js': 'mine.html',
     'js/detail.js': 'detail.html',
+    'js/admin.js': 'admin.html',
   };
-  const HTML_FILES = ['index.html', 'mine.html', 'detail.html'];
-  // 运行时才生成的 id（AI 面板 / 状态块 / 账号区按钮 / 资料表单）：HTML 源里没有它们，属正常
+  const HTML_FILES = ['index.html', 'mine.html', 'detail.html', 'admin.html'];
+  // 运行时才生成的 id（AI 面板 / 状态块 / 账号区按钮 / 资料表单 / 管理闸门）：HTML 源里没有它们，属正常
   const DYNAMIC_IDS = ['ai-rep-note', 'ai-report', 'ai-stream-label', 'ai-stream-text',
                        'source-clear', 'account-signin', 'account-signout',
                        'profile-signin', 'pf-preview', 'pf-nickname', 'pf-bio',
-                       'pf-presets', 'pf-file', 'pf-note', 'pf-save'];
+                       'pf-presets', 'pf-file', 'pf-note', 'pf-save',
+                       'admin-signin'];
 
   const htmlIds = {};
   HTML_FILES.forEach((f) => {
