@@ -511,8 +511,26 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   await page.goto(BASE + '/#/forum', { waitUntil: 'networkidle' });
   await page.waitForSelector('#forum-list .post-card');
 
+  // 基准不再写死本地种子的条数：论坛是**活的**——用户发的帖过审后就会多出一条。
+  // 改成拿页头徽卡「已通过」的数字当基准，与列表条数交叉验证：
+  // 两边不一致才是真错；线上比种子多，是正常的。
+  const forumApprovedNum = await page.evaluate(() => {
+    const cards = document.querySelectorAll('#forum-stats .stat-card');
+    for (const c of cards) {
+      if ((c.textContent || '').indexOf('已通过') !== -1) {
+        const n = c.querySelector('.stat-num');
+        return n ? parseInt(n.textContent, 10) : -1;
+      }
+    }
+    return -1;
+  });
+  const forumListed = await page.locator('#forum-list .post-card').count();
+
   R['F1_论坛已换真骨架'] = (await page.locator('#view-forum .placeholder').count()) === 0 &&
-    (await page.locator('#forum-list .post-card').count()) === APPROVED_POSTS.length;
+    forumListed > 0 && forumListed === forumApprovedNum &&
+    forumApprovedNum >= APPROVED_POSTS.length;   // 种子帖一条都不能少（线上只多不少）
+  if (!R['F1_论坛已换真骨架']) O['F1_基准'] = '列表 ' + forumListed + ' 条 / 徽卡 ' +
+    forumApprovedNum + ' 条 / 种子 ' + APPROVED_POSTS.length + ' 条';
 
   // 待审样例的标题一个字都不许出现在公开列表里
   R['F2_未过审帖子不进公开列表'] = await page.evaluate((titles) => {
@@ -529,7 +547,7 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     const uniq = (await page.locator('#forum-cats .chip.active').count()) === 1;
     await page.locator('#forum-cats .chip[data-cat="all"]').click();
     await page.waitForTimeout(350);
-    const back = (await page.locator('#forum-list .post-card').count()) === APPROVED_POSTS.length;
+    const back = (await page.locator('#forum-list .post-card').count()) === forumListed;
     return only && uniq && back;
   })();
 
@@ -542,7 +560,7 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     const hasExit = (await page.locator('#forum-list .empty-jump').count()) >= 1;
     await page.locator('#forum-list .empty-jump').first().click();
     await page.waitForTimeout(400);
-    const back = (await page.locator('#forum-list .post-card').count()) === APPROVED_POSTS.length &&
+    const back = (await page.locator('#forum-list .post-card').count()) === forumListed &&
       (await page.inputValue('#forum-search')) === '';
     return zero && text && hasExit && back;
   })();

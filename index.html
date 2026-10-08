@@ -24,7 +24,11 @@
         <button class="nav-tab" role="tab" id="tab-forum" data-view="forum"
                 aria-selected="false" aria-controls="view-forum" tabindex="-1">论坛</button>
       </nav>
-      <a class="avatar-btn" href="mine.html" aria-label="进入个人主页" title="个人主页">创</a>
+      <!-- 我的入口（Day 23：登录后换成自己的头像 + 昵称，让「已登录」当场看得见） -->
+      <a class="header-me" href="mine.html" id="header-me" aria-label="进入个人主页" title="个人主页">
+        <span class="header-me-name" id="header-me-name" hidden></span>
+        <span class="avatar-btn" id="header-avatar" aria-hidden="true">创</span>
+      </a>
     </div>
   </header>
 

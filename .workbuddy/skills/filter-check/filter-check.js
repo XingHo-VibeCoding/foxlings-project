@@ -173,7 +173,8 @@ const COMPS = {
     itemSel: '.post-card',
     search: '#forum-search',
     summary: '#forum-summary',
-    baseline: OK_POSTS.length
+    baseline: OK_POSTS.length,
+    grows: true            // 活数据：用户发的帖过审后会多出来，登记值只当下限
   },
   favs: {
     label: '个人主页·我的收藏',
@@ -218,8 +219,11 @@ async function checkComp(page, key, cfg, R) {
 
   await cfg.prepare(page);
 
-  // A0 基线：不加任何筛选时的条数
-  R[p + 'A0_基线条数'] = (await items().count()) === cfg.baseline;
+  // A0 基线：不加任何筛选时的条数。
+  // 「活数据」组件（论坛帖子会因用户过审而增加）不能拿登记表的死数字卡死——
+  // 登记值当**下限**用；其余组件仍要求精确相等。之后的恢复比对一律用本次实测值。
+  const base = await items().count();
+  R[p + 'A0_基线条数'] = cfg.grows ? base >= cfg.baseline : base === cfg.baseline;
 
   // A0b 条件筛选器存在（登记了 chips 却没渲染出来 = FAIL，避免缺件被静默跳过）
   if (cfg.chips) {
@@ -282,7 +286,7 @@ async function checkComp(page, key, cfg, R) {
   if (await exitBtn.count()) {
     await exitBtn.click();
     await page.waitForTimeout(400);
-    R[p + 'A3_出口恢复_条数'] = (await items().count()) === cfg.baseline;
+    R[p + 'A3_出口恢复_条数'] = (await items().count()) === base;
     const v = await page.inputValue(cfg.search);
     R[p + 'A3_出口恢复_输入框已清空'] = v === '';
   } else {
@@ -293,7 +297,7 @@ async function checkComp(page, key, cfg, R) {
   await page.waitForTimeout(350);
   await page.fill(cfg.search, '');
   await page.waitForTimeout(400);
-  R[p + 'A3b_手动清空恢复_条数'] = (await items().count()) === cfg.baseline;
+  R[p + 'A3b_手动清空恢复_条数'] = (await items().count()) === base;
 
   // B1 零数据态（仅登记的组件）：与「筛空」文案必须不同
   if (cfg.zeroDataCheck) {

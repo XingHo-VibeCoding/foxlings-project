@@ -115,6 +115,26 @@ body {
 }
 .avatar-btn:hover { background: var(--c-primary); color: var(--c-white); }
 
+/* ---------- 页头「我的入口」（Day 23）：未登录 = 站标「创」，登录后 = 我的头像 + 昵称 ---------- */
+.header-me {
+  margin-left: auto; display: flex; align-items: center; gap: 8px;
+  text-decoration: none; border-radius: 22px;
+}
+/* 原来 margin-left:auto 在按钮上，现在挪到外层链接，按钮自己不再撑开 */
+.header-me .avatar-btn { margin-left: 0; }
+.header-me-name {
+  font-size: 13px; color: var(--c-text); max-width: 7em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 上传头像是一张图，要填满圆按钮且不撑变形 */
+.avatar-btn img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+.header-me:hover .avatar-btn { background: var(--c-primary); color: var(--c-white); }
+.header-me:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 2px; }
+/* 窄屏留给品牌与导航，昵称收起（头像仍能认人） */
+@media (max-width: 640px) {
+  .header-me-name { display: none; }
+}
+
 /* 手机：品牌 + 头像一行，导航整行落到第二行（避免 360px 下挤爆） */
 @media (max-width: 640px) {
   .nav-tabs { order: 3; width: 100%; justify-content: space-between; }

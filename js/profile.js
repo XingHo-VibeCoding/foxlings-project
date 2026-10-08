@@ -134,3 +134,71 @@ function avatarHtml(uid, name, cls) {
   return '<span class="fx-avatar ' + extra + '" aria-hidden="true" style="background:' +
     preset.bg + ";color:" + preset.fg + '">' + escHtml(String(preset.word || "匿")) + "</span>";
 }
+
+/* ============================================================
+   页头「我的入口」（Day 23）
+
+   原来页头右上角永远是一个写死的「创」字——登录前后毫无变化，
+   用户根本感知不到「我登录了没有」。现在：未登录 = 站标「创」；
+   登录后 = 本人的头像（上传图或预设块）+ 昵称，点一下进个人主页。
+
+   只在**有该结构的页面**生效（元素不存在就直接返回），
+   所以没引本文件的页面不受影响。
+   ============================================================ */
+
+/** 把头像画进一个已有元素（上传图优先，否则预设色块）—— 供页头圆按钮复用 */
+function paintAvatarInto(el, uid, name) {
+  const row = profileOf(uid);
+  const url = row && row.avatar_kind === "upload" && row.avatar_value
+    ? __avUrls[row.avatar_value] : null;
+
+  if (url) {
+    el.textContent = "";
+    const img = document.createElement("img");
+    img.src = url;                 // 走 DOM 属性赋值，不当 HTML 拼
+    img.alt = "";
+    el.appendChild(img);
+    el.style.background = "";      // 有真图就不需要底色
+    return;
+  }
+
+  const preset = (row && presetOf(row.avatar_value)) || defaultPreset((row && row.nickname) || name);
+  el.textContent = String(preset.word || "创");
+  el.style.background = preset.bg;
+  el.style.color = preset.fg;
+}
+
+/** 页头入口重绘：未登录回落站标；登录后取资料画自己的头像与昵称 */
+async function refreshHeaderMe() {
+  const host = document.getElementById("header-me");
+  const btn = document.getElementById("header-avatar");
+  const nameEl = document.getElementById("header-me-name");
+  if (!host || !btn) return;       // 该页面没有这个结构，安静退出
+
+  if (!auth.isSignedIn()) {
+    btn.textContent = "创";
+    btn.style.background = "";
+    btn.style.color = "";
+    if (nameEl) { nameEl.textContent = ""; nameEl.hidden = true; }
+    host.setAttribute("title", "个人主页");
+    host.setAttribute("aria-label", "进入个人主页");
+    return;
+  }
+
+  await ensureProfiles();          // 取资料（含头像的签名 URL）
+  const row = myProfile() || {};
+  const nick = row.nickname || "";
+  const email = auth.session && auth.session.user ? auth.session.user.email : "";
+
+  paintAvatarInto(btn, auth.uid(), nick || email || "我");
+  if (nameEl) { nameEl.textContent = nick; nameEl.hidden = !nick; }
+  host.setAttribute("title", (nick ? nick + " · " : "") + "个人主页");
+  host.setAttribute("aria-label", "进入个人主页" + (nick ? "（" + nick + "）" : ""));
+}
+
+/* 启动：先按未登录画一次，等身份层恢复会话后再重画一遍 */
+refreshHeaderMe();
+auth.onChange(() => {
+  resetProfileCache();             // 换人了：上一账号的资料与签名 URL 一律作废
+  refreshHeaderMe();
+});
