@@ -44,15 +44,18 @@ CREATE TABLE items (
   origin      TEXT        NOT NULL,                     -- 最早出处；允许「未能溯源」+已知流传信息
   first_seen  DATE        NOT NULL,
   updated_at  DATE        NOT NULL,
-  heat        SMALLINT    NOT NULL DEFAULT 0            -- 辟谣榜排序依据
+  heat        SMALLINT    NOT NULL DEFAULT 0            -- 人工热度 0-100（编辑填的「初始票数」）
               CHECK (heat BETWEEN 0 AND 100),
   heat_note   TEXT,                                     -- 热度角标文案，如「微博热搜前 10」
+  views       INTEGER     NOT NULL DEFAULT 0            -- 真实浏览量（Day 23）；只能由函数 +1，客户端改不了
+              CHECK (views >= 0),
   cross_check TEXT        CHECK (cross_check IN ('相互印证', '存在矛盾', '信源不足')),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()         -- 入库时间（前端不用，后台审计用）
 );
 
 COMMENT ON TABLE  items IS '核查条目：辟谣榜与详情页的唯一数据源';
-COMMENT ON COLUMN items.heat IS '0-100 整数；缺失/非法时前端回退按 updated_at 倒序';
+COMMENT ON COLUMN items.heat IS '人工热度 0-100，由编辑填写；缺失/非法时前端回退 0';
+COMMENT ON COLUMN items.views IS '真实浏览量：详情页每被一台设备打开一次 +1，只能经 bump_item_view() 自增；前端拿 (heat + views) 计算榜单热度分';
 COMMENT ON COLUMN items.cross_check IS '多源比对结论；NULL 或非法值一律按「信源不足」降级';
 
 -- 榜单主查询：先按时间档过滤 updated_at，再按 heat 排序
@@ -63,6 +66,48 @@ CREATE INDEX idx_items_verdict   ON items (verdict);
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX idx_items_title_trgm   ON items USING gin (title   gin_trgm_ops);
 CREATE INDEX idx_items_summary_trgm ON items USING gin (summary gin_trgm_ops);
+
+-- ---------------------------------------------------------------------------
+-- ①-b bump_item_view —— 热度算法里「点击量」那一半的来源（Day 23 新增）
+--
+-- 为什么要有这么个函数：items 表**没有任何写策略**，客户端连 UPDATE 权限都没有
+-- （实测 PATCH 一律 permission denied for table items）。可浏览量必须在服务端
+-- 自增，于是把「+1」这件事本身做成一个函数，闸门不必打开：
+--
+--   · SECURITY DEFINER —— 以函数定义者的身份执行，越过 items 的只读闸门；
+--   · 参数只有条目 id、**没有数字** —— 调用者只能说「+1」，不能说「改成 900」。
+--     产品规则「管理员也不能手动调序」由此由函数签名保证，而不是靠自觉；
+--   · 原子自增（views = views + 1）—— 并发点击不会像「前端读 n 再写 n+1」那样丢计数；
+--   · 条目不存在时一行不改、返回 -1，前端据此静默忽略。
+--
+-- `SET search_path = public` 是 SECURITY DEFINER 函数的必备项：不锁死搜索路径，
+-- 别人就能在别的 schema 里造同名对象，劫持函数体里的表引用。
+--
+-- 去重（同设备同条目只算一次）**不在这层** —— 函数不知道、也不该知道
+-- 「你是不是第一次来」，那件事由前端 localStorage 拦在调用之前（js/detail.js）。
+-- 代价说清楚：换浏览器、清缓存、开无痕，同一个人的同一条都会再算一次。
+-- 当前规模（浏览量个位数）接受这个误差；将来要更准，得加「访客 × 条目 × 天」日志表。
+--
+-- ⚠️ 托管环境的 exec_sql **一次只收一条语句**：CREATE FUNCTION 与 GRANT 要分两次发。
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION bump_item_view(p_id text)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v integer;
+BEGIN
+  UPDATE items SET views = views + 1 WHERE id = p_id RETURNING views INTO v;
+  RETURN COALESCE(v, -1);
+END;
+$$;
+
+-- 未登录访客也要能计数（anon 角色）—— 和 reports 表允许匿名提交同一条思路
+GRANT EXECUTE ON FUNCTION bump_item_view(text) TO anon, authenticated;
+
+COMMENT ON FUNCTION bump_item_view(text) IS '给某条核查 +1 次浏览，返回自增后的值；条目不存在返回 -1。SECURITY DEFINER，是 items 只读闸门上唯一放行「+1」的通道';
 
 -- ---------------------------------------------------------------------------
 -- ② posts — 论坛帖子（Day 21 已启用）

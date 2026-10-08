@@ -334,6 +334,7 @@ async function initDetail() {
   renderSources(item);
   initSourceFilter();
   recordHistory(item.id);   // 留一笔浏览足迹（个人主页读取）
+  reportView(item.id);      // 给这条核查 +1 次浏览（辟谣榜热度算法的输入之一）
 }
 
 /* ============================================================
@@ -356,6 +357,38 @@ function recordHistory(id) {
     localStorage.setItem(HIST_KEY, JSON.stringify(list.slice(0, HIST_MAX)));
   } catch (e) {
     // 无痕模式 / 存储被禁用：忽略即可，浏览足迹不是核心功能
+  }
+}
+
+/* ============================================================
+   Day 23：浏览计数上报 —— 辟谣榜热度算法里「点击量」那一半的来源
+
+   规则：**同设备同条目只算一次**。这个数字要能当「有多少人关心这条」来读，
+   而不是「页面被刷了几次」—— 否则自己按住 F5 就能把一条顶上榜。
+   去重拦在前端（localStorage 里记下已上报过的 id）；服务端那个函数只管 +1，
+   它不知道也不该知道「你是不是第一次来」。
+
+   上报失败一律静默：浏览计数是锦上添花，绝不能因为它没上报成功就影响看档案。
+   ============================================================ */
+
+async function reportView(id) {
+  if (!id) return;
+
+  const seen = readJSON(VIEW_KEY, []);
+  const list = Array.isArray(seen) ? seen : [];
+  if (list.indexOf(id) !== -1) return;   // 这条在你这台设备上已经计过了
+
+  list.push(id);
+  try {
+    localStorage.setItem(VIEW_KEY, JSON.stringify(list));
+  } catch (e) {
+    // 无痕模式 / 存储被禁用：继续上报。最坏情况是同一台设备多算几次，不影响页面
+  }
+
+  try {
+    await api.bumpItemView(id);
+  } catch (e) {
+    console.warn("[detail] 浏览量上报失败（忽略）：", e && e.message);
   }
 }
 

@@ -62,7 +62,35 @@
          与「不许输出网址」两条底线 —— 第一条是产品定位，第二条是防编造。
      新增 S 组 4 条盯 AI 区的界面纪律（引导态不留白、AI 生成标注在位、
      输入过短不发模型请求、按钮触控达标）。
-     硬门槛总数 87 → 94。 */
+     硬门槛总数 87 → 94。
+     硬门槛总数 94 → 100（个性化那一版）。
+
+   Day 23 变更记录（管理后台 · 浏览量 · 热度算法）：
+     ① 管理后台（admin.html / js/admin.js）纳入检查面：该页一并进了静态审计、
+        A 组分层扫描与 H 组结构契约（admin.js 已是 PAGE_SCRIPTS 的一员），
+        另加「后台入口默认 hidden、由服务端判定点亮」的显隐契约。
+        硬门槛总数 100 → 105。
+     ② 辟谣榜排序由「heat 降序」改成「(heat + 真实浏览) × 0.5^(距今天数/14)」。
+        浏览量走数据库函数 bump_item_view 原子自增 —— items 表本身仍然只读，
+        客户端连 UPDATE 权限都没有（实测 PATCH 一律 permission denied），
+        所以「+1」是墙上开的一扇小窗，不是拆门。新增 V 组 6 条：
+        分层 2 条（页面不许出现 bump_item_view / 接口层必须实现它）、
+        公式 1 条（半衰期常量与 heatScore 都在位）、
+        端到端机制 2 条（打开详情真 +1 / 同设备不重复计数）、
+        呈现 1 条（有浏览量的卡片必须把数字露出来）；A1 的正则补上 rpc(。
+        ⚠️ V4/V5 会真写一次线上浏览计数（靶子取 SEED_ITEMS[1]，与前面用
+        SEED_ITEMS[0] 的断言错开）—— 那是脚本自己打开详情页产生的真实浏览。
+        硬门槛总数 105 → 111。
+     ③ 「拿本地种子当死基准」这个坑当天第三次踩到：种子里那条「【待审样例】」
+        在管理后台被真的点了「通过」之后，它**本来就该**出现在公开列表里，
+        而 F2 的老写法（拿种子 pending 标题去页面上搜）只会红给你看。
+        F2 改成自适应：靶子 = 「种子说 pending」∩「云端此刻确实还没过审」
+        （云端状态由页面自己读，访客身份读得到就说明已过审），
+        一条可验靶子都没有时记观察项、不判失败。
+        另新增 F12 从源码层堵住通往坏结果的唯一那条路：
+        论坛不许出现管理侧的 listAllPosts / listAllReports（读了全量等于
+        把审核闸门从数据库搬到前端把守）。
+        硬门槛总数 111 → 112。 */
 const fs = require('fs');
 
 /* playwright-core 与 Edge 的定位（Day 22 修）
@@ -533,11 +561,43 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   if (!R['F1_论坛已换真骨架']) O['F1_基准'] = '列表 ' + forumListed + ' 条 / 徽卡 ' +
     forumApprovedNum + ' 条 / 种子 ' + APPROVED_POSTS.length + ' 条';
 
-  // 待审样例的标题一个字都不许出现在公开列表里
+  /* 待审样例的标题一个字都不许出现在公开列表里。
+
+     Day 23 修（同一个坑第三次）：靶子不能只认「本地种子的 pending」。
+     「【待审样例】」那条在管理后台被真的点了「通过」之后，它**本来就该**出现在
+     公开列表里 —— 老写法却把它当泄漏，直接报红。这和当天早些时候
+     「拿本地种子条数当死基准」是同一类错误：活数据不能当基准。
+
+     现在的靶子 = 「种子说是 pending」∩「云端此刻确实还没过审」。
+     云端状态由页面自己读（访客身份，RLS 只返回 approved）——
+     读得到就等于已经过审了，不再是靶子。
+     一条可验靶子都没有时（待审帖都处理完了）记观察项、不判失败：
+     那时前端本来就无从泄漏，硬报红只会训练人「看见红字当噪声」。 */
+  const viewableTitles = await page.evaluate(async () => {
+    try { return (await api.getPosts()).map((p) => String(p.title)); }
+    catch (e) { return null; }
+  });
+  const pendTargets = viewableTitles
+    ? PENDING_TITLES.filter((t) => !viewableTitles.some((x) => x.indexOf(t) !== -1))
+    : [];
   R['F2_未过审帖子不进公开列表'] = await page.evaluate((titles) => {
+    if (!titles.length) return true;                    // 没有可验的靶子：无从泄漏
     const txt = (document.querySelector('#forum-list') || {}).textContent || '';
-    return titles.length > 0 && titles.every((t) => txt.indexOf(t) === -1);
-  }, PENDING_TITLES);
+    return titles.every((t) => txt.indexOf(t) === -1);
+  }, pendTargets);
+  O['F2_靶子'] = pendTargets.length
+    ? '可验 ' + pendTargets.length + ' 条（' + pendTargets.join('、') + '）'
+    : '无可验靶子 —— 种子里的待审样例在云端已过审（' + PENDING_TITLES.join('、') + '）';
+
+  /* F12：论坛永远只走「普通读接口」。
+     别人的待审帖在普通读接口下**根本拿不到**（RLS 的 posts_read 只给 approved
+     或作者本人），所以「列表里不出现未过审帖」这件事是数据库保证的。
+     能打破它的只有一条路：页面改用管理侧的 listAllPosts() 去读全量 ——
+     那等于把审核闸门从数据库搬到前端来把守。
+     F2 断的是「结果」，这条断的是「通往坏结果的唯一那条路」，两条合起来才完整。
+     （这里不用 readSrc：那个 const 定义在后面的 A 组，提前引用会撞 TDZ。） */
+  R['F12_论坛不读全量帖子'] = !/listAllPosts|listAllReports/.test(
+    fs.readFileSync(ROOT + '/js/forum.js', 'utf8'));
 
   // 分类筛选：点「已解决」后列表里只剩这一类，且回「全部」能恢复
   R['F3_分类筛选生效'] = await (async () => {
@@ -639,8 +699,9 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   const readSrc = (f) => { try { return fs.readFileSync(ROOT + '/' + f, 'utf8'); } catch (e) { return ''; } };
 
   // Day 22：云存储也归「数据源」—— 页面不许自己 upload / createSignedUrls
+  // Day 23：rpc( 同属 SDK 直连（浏览自增走的就是它），一并收进接口层
   R['A1_页面不绕过接口层碰数据'] = PAGE_SCRIPTS.every((f) =>
-    !/cloud\.database|cloud\.storage|\.from\(["']|WorkBuddyCloud|fetch\(/.test(readSrc(f)));
+    !/cloud\.database|cloud\.storage|\.from\(["']|rpc\(|WorkBuddyCloud|fetch\(/.test(readSrc(f)));
 
   // 身份动作同理：登录/发码/验证只许出现在 auth.js，页面只调 auth.xxx()
   R['A2_身份动作只在身份层'] = PAGE_SCRIPTS.every((f) =>
@@ -750,6 +811,89 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
   const guestBtn = await page.locator('#profile-body #profile-signin').count();
   const guestForm = await page.locator('#profile-body #pf-nickname').count();
   R['P2_未登录资料区给登录出口'] = guestBtn === 1 && guestForm === 0;
+
+  /* ---- V 组：浏览量 · 热度算法（Day 23 新增） ----
+     辟谣榜的排序依据从「按编辑填的 heat 排」换成
+     「(heat + 真实浏览) × 时间半衰期衰减」——榜单从此多了一条**能被访客改写**的输入。
+     多一条输入就多三处会悄悄跑偏的地方，这一组就是盯它们的：
+       V1/V2 分层：浏览自增只能待在接口层（页面脚本连 bump_item_view 都不许出现）；
+       V3 公式：排序必须真的带半衰期衰减，别一不留神退回「谁新谁在前」；
+       V4/V5 机制：详情页打开真的 +1、同一台设备重复打开不重复计数；
+       V6 呈现：有浏览量的卡片必须把数字露出来（算了半天不给人看等于白算）。
+
+     ⚠️ V4/V5 会**真的调一次线上函数**（给靶子条目 +1 次浏览）。
+        这不算污染数据 —— 脚本确实打开了那个页面，它就是一次真实浏览；
+        靶子专门取 SEED_ITEMS[1]，与前面用 SEED_ITEMS[0] 的断言错开，
+        免得「这台设备早就算过了」和「本次该不该新增」混在一起算不清。 */
+  const apiSrcV = readSrc('js/api.js');
+  const homeSrcV = readSrc('js/home.js');
+
+  R['V1_浏览自增只在接口层'] = PAGE_SCRIPTS.every((f) => !/bump_item_view/.test(readSrc(f)));
+  R['V2_接口层实现了浏览自增'] = /rpc\(\s*["']bump_item_view["']/.test(apiSrcV);
+  R['V3_榜单用半衰期热度排序'] = /HEAT_HALF_LIFE_DAYS\s*=\s*\d+/.test(homeSrcV) &&
+    /Math\.pow\(0\.5,/.test(homeSrcV) &&
+    /function\s+heatScore/.test(homeSrcV) &&
+    /function\s+viewsOf/.test(homeSrcV);
+
+  // 从页面自己读云端计数：页面本来就连着云库，脚本不必自己拼 endpoint 与 key
+  const readViewsOf = (pg, id) => pg.evaluate(async (i) => {
+    const list = await api.getItems();
+    const it = list.find((x) => x.id === i);
+    return it ? (it.views || 0) : -1;
+  }, id);
+  const waitViewsOf = async (pg, id, expect, ms) => {
+    const t0 = Date.now();
+    let v = await readViewsOf(pg, id);
+    while (v !== expect && Date.now() - t0 < ms) {
+      await pg.waitForTimeout(500);
+      v = await readViewsOf(pg, id);
+    }
+    return v;
+  };
+
+  const VIEW_ID = (SEED_ITEMS[1] || {}).id || '';
+  if (!VIEW_ID) {
+    R['V4_详情页打开浏览量加一'] = false;
+    R['V5_同设备不重复计数'] = false;
+  } else {
+    const vCtx = await browser.newContext({ viewport: { width: 1280, height: 790 } }); // 干净 localStorage = 另一台设备
+    const vPage = await vCtx.newPage();
+    await vPage.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
+
+    const before = await readViewsOf(vPage, VIEW_ID);
+    await vPage.goto(BASE + '/detail.html?id=' + encodeURIComponent(VIEW_ID), { waitUntil: 'networkidle' });
+    const after1 = await waitViewsOf(vPage, VIEW_ID, before + 1, 8000);
+    R['V4_详情页打开浏览量加一'] = after1 === before + 1;
+    O['V4_实测'] = '靶子 ' + VIEW_ID + '：' + before + ' → ' + after1;
+
+    await vPage.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
+    await vPage.goto(BASE + '/detail.html?id=' + encodeURIComponent(VIEW_ID), { waitUntil: 'networkidle' });
+    await vPage.waitForTimeout(2500);
+    const after2 = await readViewsOf(vPage, VIEW_ID);
+    R['V5_同设备不重复计数'] = after2 === after1;
+    O['V5_实测'] = '同一台设备再打开一次后仍为 ' + after2;
+
+    await vCtx.close();
+  }
+
+  /* V6：卡片上的浏览数不是「代码里写了」就算数，要真出现在页面上。
+     判据取「榜单里凡云端 views>0 的条目，其卡片必须带『浏览 N 次』」——
+     全站还没人点开过任何一条时不罚（那时确实无从验），但有数字就必须露出来。 */
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#board-list .card');
+  const v6rows = await page.evaluate(async () => {
+    const items = await api.getItems();
+    const byId = {};
+    items.forEach((x) => { byId[x.id] = x.views || 0; });
+    return [...document.querySelectorAll('#board-list .card')].map((c) => {
+      const id = decodeURIComponent((c.getAttribute('href') || '').split('id=')[1] || '');
+      return { id: id, views: byId[id] || 0, meta: c.querySelector('.card-meta').textContent };
+    });
+  });
+  const v6need = v6rows.filter((r) => r.views > 0);
+  R['V6_卡片显示浏览量'] = v6need.length === 0 ||
+    v6need.every((r) => /浏览\s*\d+\s*次/.test(r.meta));
+  O['V6_榜单浏览量分布'] = v6need.length + ' / ' + v6rows.length + ' 张卡带浏览量';
 
   /* ---- R 回归底线：三个核心动作 ---- */
   await page.setViewportSize({ width: 1280, height: 790 });

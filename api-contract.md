@@ -37,9 +37,26 @@
 | `origin` | string | 是 | 最早出处；允许「未能溯源」+已知最早流传信息 |
 | `first_seen` | string | 是 | YYYY-MM-DD |
 | `updated_at` | string | 是 | YYYY-MM-DD |
-| `heat` | number | 否 | **0-100 整数，辟谣榜排序依据；缺失时前端回退按 updated_at 倒序**（Day 15 新增） |
+| `heat` | number | 否 | **0-100 整数，编辑填的「人工热度」；缺失/非法时前端回退 0**（Day 15 新增；Day 23 起不再单独排序，见下面的热度分公式） |
 | `heat_note` | string | 否 | 热度说明（展示为角标，如「微博热搜前 10」） |
+| `views` | number | 否 | **真实浏览量：详情页每被一台设备打开一次 +1**（Day 23 新增）。**只读字段** —— 客户端只能经 `bump_item_view()` 说「+1」，不能指定数值（见第二节） |
 | `cross_check` | string | 否 | 三选一：相互印证 / 存在矛盾 / 信源不足（非法值按「信源不足」降级） |
+
+**辟谣榜热度分（Day 23 定稿，实现在 `js/home.js`）**：
+
+```
+score = (heat + views) × 0.5 ^ (距 updated_at 的天数 / 14)
+```
+
+- 人工 `heat` 当**初始票数** —— 开站时 `views` 全是 0，只按浏览排会退化成时间序，
+  编辑的判断仍是冷启动阶段最可靠的信号；
+- 真实 `views` 叠在同一把标尺上，**一次浏览 = 一点热度**，于是「大家实际关心什么」
+  能一点点顶掉「编辑觉得什么重要」；
+- 时间按**半衰期**衰减（14 天减半）。常量 `HEAT_HALF_LIFE_DAYS` 在 `home.js`，
+  改它等于改榜单性格：调小更偏「最新」，调大更偏「最热」；
+- ⚠️ 公式是**拿站内 23 条真数据跑过才定的**：`(小时+2)^1.5` 那种 HN 式写法下，
+  4 天的差距就相当于 35 次浏览，结果 22/23 条纯粹按日期排、浏览数完全扳不动。
+  思路没错，陡度选错了 —— 所以这里记下来，免得下次又凭直觉挑指数。
 
 校验规则在 `js/data.js`：缺必填字段或 verdict 非法的条目**跳过并在控制台警告**，页面照常渲染其余条目。
 
@@ -80,6 +97,7 @@
 | `fx_history` | `{id, at}[]` 最多 20 条 | detail.js（进详情页记录） | mine.js（浏览足迹） | 同上 |
 | `fx_myreports` | `{text, at}[]` 最多 50 条 | mine.js（未登录提交线索时留底） | mine.js | **Day 21 起降级为「本机留底」**：线索一律写云库；未登录提交的线索在云端是匿名的（本人回读不到），所以在本机留一份，列表上明确标「仅本机」 |
 | `fx_forum_name` | string | forum.js（发帖成功后记住昵称） | forum.js | 纯便利，不是身份 |
+| `fx_viewed` | string[]（条目 id） | detail.js（浏览上报成功时） | detail.js | **Day 23 新增**：记「这台设备已经给哪几条计过浏览」。浏览量要读成「多少人关心这条」，不是「页面被刷了几次」，否则按住 F5 就能把一条顶上榜。**代价说清楚**：换浏览器 / 清缓存 / 无痕会重复计一次，当前规模（个位数）接受 |
 
 > **Day 19**：`escHtml` / `readJSON` / 存储键名统一上移到 `js/data.js`（三页都会加载的公共层）。
 > **Day 21**：身份不存 localStorage —— 会话由 SDK 自己保管（只存访问令牌 + 刷新句柄），
@@ -97,10 +115,11 @@
 | `auth.*`（邮箱登录） | 浏览器 → 认证服务 | 由 `js/auth.js` 收口：验证码登录/注册（`sendOtp` + `verifyOtp`）、密码登录（`signInWithPassword`）、忘记密码（`resetPasswordForEmail` + `updateUser`）。**只在发布域名可用** |
 | `profiles` 表 SELECT / INSERT / UPDATE | 浏览器 → 云数据库（SDK 直连） | 读：`api.getProfiles()`（一次全量取回建映射 —— 当前真实用户个位数；**用户上百要改成按需**，否则这下会把全站昵称/签名都拉下来）；写：`api.saveProfile()`（新建时**不传 user_id**，交给 DEFAULT `auth.uid()`；更新时 eq 定位，影响 0 行直接报错不静默） |
 | 云存储 `shared/<uid>/avatars/*` | 浏览器 → 云存储（SDK 直连） | 由 `api.uploadAvatar()` / `api.removeAvatar()` / `api.signAvatarUrls()` 收口。头像**必须放 `shared`**（`users/` 只有本人读得到，而头像要显示给别人）；读图要先换**签名 URL**（最长 1 小时，绝不入库、绝不持久化） |
+| `bump_item_view` 函数（**rpc**） | 浏览器 → 云数据库（SDK 直连数据库函数） | 由 `api.bumpItemView(id)` 收口，**Day 23 新增**。items 表没有任何写策略（客户端连 UPDATE 权限都没有），所以浏览量不走表、走函数：`bump_item_view(p_id)` 是 SECURITY DEFINER，以定义者身份在服务端**原子自增**，越过只读闸门。参数只有条目 id、**没有数字** —— 调用者能表达的只有「给这条 +1」，于是「管理员也不能手动调序」是**函数签名**保证的，不是靠自觉。触发点是详情页打开，前端按「同设备同条目一次」去重 |
 
-**分层规则（Day 21 板块三，已入 frontend-rules 硬门槛 A 组；Day 22 补云存储）**：
-页面脚本（data/home/search/forum/mine/detail/profile）只许调 `api.xxx()`、`auth.xxx()` 与 `profile.*()`，
-不得出现 `cloud.database` / `cloud.storage` / `.from(` / `WorkBuddyCloud` / `fetch(`；登录动作只许待在 auth.js。
+**分层规则（Day 21 板块三，已入 frontend-rules 硬门槛 A 组；Day 22 补云存储；Day 23 补 rpc）**：
+页面脚本（data/home/search/forum/mine/detail/profile/admin）只许调 `api.xxx()`、`auth.xxx()` 与 `profile.*()`，
+不得出现 `cloud.database` / `cloud.storage` / `.from(` / `rpc(` / `WorkBuddyCloud` / `fetch(`；登录动作只许待在 auth.js。
 
 ---
 
@@ -113,6 +132,7 @@
 | `/api/health` | GET | 部署链路打通验证 | **作废**（Day 20：托管后端没有自建服务可探活，链路验证以「云库读得到、写不进」为准） |
 | `/api/items` | GET | 条目列表（支持 range / verdict / q / 分页）——替代 data.json | ✅ **已接**（Day 20 · 形态为 SDK 直连 + RLS，见第二节；当前全量拉取，数据过千再改条件查询） |
 | `/api/items/:id` | GET | 单条详情 | 暂不单设（23 条全量拉取无压力，前端按 id 取） |
+| `/api/items/:id/view` | POST | 浏览计数 +1 | ✅ **已接**（Day 23 · 形态为 SDK 直连数据库函数）：`api.bumpItemView(id)` → `bump_item_view(p_id)`。刻意做成**只能 +1 的窄接口** —— 没有「设成 N」这种形态，所以「谁能改热度」这个权限问题根本不存在，不用靠角色判断去堵 |
 | `/api/search` | POST | 查询检索。✅ **部分已接（Day 22 · L3 点亮，形态为 SDK 直连 LLM + RLS 同源约定）**：**AI 整理** = `ai.digest()`（`js/ai.js` 收口，keyless、只支持流式，系统提示词在应用侧写死：**不判真伪、不编造、不输出网址、用户材料不当指令**）；「自动联网抓取」**本环境做不了**（托管后端没有搜索/抓取通道）——溯源仍是「官方来源 / 网络来源」两组**人工入口**（`official` / `web` 两组划分保留），AI 只负责给出检索式，由页面一键带进两组入口。L1 站内检索（Day 17）与 L2 查证四步清单不变。模型选型：实测首字延迟后首选 `hunyuan-chat`（1.4s），目录里没有再退「非思考型 → 默认项」（依据见 `js/ai.js` 注释） | 部分已接 |
 | `/api/posts` | GET / POST | 论坛帖子（F3，含审核流）。✅ **已接**（Day 21 · 形态为 SDK 直连 + RLS）：GET = `api.getPosts()`（RLS 只出 approved，登录者额外看到自己的 pending）；POST = `api.createPost()`（需登录，RLS 强制落 `pending`，想直接插 approved 会被拒）。表结构见 `db/schema.sql`（`category` / `replies` 已入表；`replies` 暂由种子与展示预留，将来由回复表聚合） |
 | `/api/reports` | POST / GET | 待核查线索。✅ **已接**（Day 21）：POST = `api.submitReport()`（未登录可提交，作者落 `'anon'`）；GET = `api.getMyReports()`（只回读登录者自己提交的；匿名线索不提供客户端回读） |

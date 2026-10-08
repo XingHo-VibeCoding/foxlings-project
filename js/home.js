@@ -14,17 +14,65 @@ function verdictTag(verdict) {
   return '<span class="tag tag-' + verdict + '">' + verdict + '</span>';
 }
 
-/** 热度取值：heat 缺失或不合法时回退 0（老数据也不至于排不出来） */
+/** 人工热度（0-100）：缺失或不合法时回退 0（老数据也不至于排不出来） */
 function heatOf(item) {
   return typeof item.heat === "number" && isFinite(item.heat) ? item.heat : 0;
 }
 
-/** 榜单排序：热度降序；热度相同按更新时间倒序 */
+/** 真实浏览量：详情页每被打开一次 +1（同设备同条目只算一次，去重在 detail.js） */
+function viewsOf(item) {
+  return typeof item.views === "number" && isFinite(item.views) && item.views > 0 ? item.views : 0;
+}
+
+/* ============================================================
+   热度分（Day 23）：辟谣榜的排序依据
+     score = (人工热度 + 真实浏览) × 0.5 ^ (距今天数 / 半衰期)
+
+   为什么是这三项：
+     · 人工热度当**初始票数** —— 开站第一天浏览量全是 0，只按浏览排会退化成时间序，
+       编辑对「哪条更值得看」的判断仍然是冷启动阶段最可靠的信号；
+     · 真实浏览叠加在同一条标尺上，一次浏览等于一点热度，于是「大家实际关心什么」
+       能一点点顶掉「编辑觉得什么重要」；
+     · 时间按**半衰期**衰减，而不是拿小时做幂次。这条是拿站内 23 条真数据跑出来的：
+       `(小时+2)^1.5` 那种写法下，4 天的差距就相当于 35 次浏览，结果 22/23 条
+       纯粹按日期排，浏览数根本扳不动排序 —— 公式没错，陡度选错了。
+       14 天半衰期下，热度与新鲜度才是真的在互相制衡。
+
+   ⚠️ 改这个常量等于改榜单性格：调小更偏「最新」，调大更偏「最热」。动之前先想清楚。
+   ============================================================ */
+const HEAT_HALF_LIFE_DAYS = 14;
+
+/** 距 updated_at 过了多少天（日期非法按 0 天算：不因数据问题罚它，也不让它排到天上） */
+function daysSince(dateStr) {
+  const t = Date.parse(String(dateStr || "") + "T00:00:00");
+  if (isNaN(t)) return 0;
+  return Math.max(0, (Date.now() - t) / 86400000);
+}
+
+/** 单条的热度分 */
+function heatScore(item) {
+  return (heatOf(item) + viewsOf(item)) *
+    Math.pow(0.5, daysSince(item.updated_at) / HEAT_HALF_LIFE_DAYS);
+}
+
+/** 榜单排序：热度分降序；同分按更新时间倒序，再同则按 id —— 保证顺序稳定不抖动 */
 function sortByHeat(items) {
   return items.slice().sort((a, b) =>
-    heatOf(b) - heatOf(a) ||
-    String(b.updated_at || "").localeCompare(String(a.updated_at || ""))
+    heatScore(b) - heatScore(a) ||
+    String(b.updated_at || "").localeCompare(String(a.updated_at || "")) ||
+    String(a.id || "").localeCompare(String(b.id || ""))
   );
+}
+
+/**
+ * 卡片元信息（12px 小字，B3）：信源条数恒定显示，浏览量**有人点开过才出现** ——
+ * 一排「浏览 0 次」既难看又没信息量，等于用噪声占位置。
+ */
+function cardMeta(item) {
+  const parts = ["信源 " + item.sources.length + " 条"];
+  const v = viewsOf(item);
+  if (v > 0) parts.push("浏览 " + v + " 次");
+  return parts.join(" · ") + "（点开详情可逐一验证）";
 }
 
 /**
@@ -56,7 +104,7 @@ function renderCard(item, index, opts) {
       '<span class="card-date">更新于 ' + item.updated_at + "</span></div>" +
       '<h3 class="card-title">' + item.title + "</h3>" +
       '<p class="card-summary">' + item.summary + "</p>" +
-      '<p class="card-meta">信源 ' + item.sources.length + " 条（点开详情可逐一验证）</p>" +
+      '<p class="card-meta">' + cardMeta(item) + "</p>" +
     "</div>";
   return card;
 }

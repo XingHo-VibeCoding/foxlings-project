@@ -176,6 +176,7 @@ function getIdFromUrl() {
 const FAV_KEY = "fx_favs";        // 收藏的条目 id 列表（detail.js 写 / mine.js 读）
 const HIST_KEY = "fx_history";    // 浏览足迹 {id, at}[]（detail.js 写 / mine.js 读）
 const REP_KEY = "fx_myreports";   // 我提交的待核查线索 {text, at}[]（mine.js 与论坛共用）
+const VIEW_KEY = "fx_viewed";     // 已上报过浏览的条目 id 列表（detail.js 写，防止同一条被重复计数）
 const HIST_MAX = 20;              // 浏览足迹最多保留几条
 
 /** 读 localStorage 里的 JSON：不存在或坏了都退回默认值（不让页面挂掉） */

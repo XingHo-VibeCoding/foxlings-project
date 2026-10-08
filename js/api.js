@@ -331,6 +331,34 @@ const api = {
     return (res.data && res.data.signedUrl) || null;
   },
 
+  /* ---------------- 浏览计数（Day 23 · 热度算法的「点击量」那一半） ----------------
+
+     为什么用数据库函数（rpc）而不是 UPDATE：
+     items 表**没有任何写策略**，客户端连 UPDATE 权限都没有（实测 PATCH 一律
+     permission denied for table items）。可「浏览量」又必须在服务端自增 ——
+     于是把「+1」这件事本身做成一个函数，闸门不用开：
+
+       · 函数是 SECURITY DEFINER，以定义者身份执行，越过 items 的只读闸门；
+       · 调用者只能「说 +1」，**不能指定数值**（参数只有条目 id，没有数字），
+         所以「管理员不能手动调序」这条产品规则是由函数签名保证的，不是靠自觉；
+       · 顺带拿到原子性：并发点击不会像「前端读 n 再写 n+1」那样把计数丢掉。
+
+     一句话：墙没拆，墙上开了一扇只容 +1 通过的小窗。
+
+     ⚠️ 去重不在这一层 —— 本函数只管「确实要加一次」，
+         「同设备同条目只算一次」由 detail.js 的 reportView 用 localStorage 拦在前面。 */
+  async bumpItemView(id) {
+    if (!id) return -1;
+    const res = await getCloudClient().database.rpc("bump_item_view", { p_id: id });
+    if (res && res.error) {
+      // 浏览量不是核心功能：失败只记一笔，不往页面上抛（用户没必要看见）
+      console.warn("[api] 浏览量自增失败（忽略）：", res.error.message || res.error.code);
+      return -1;
+    }
+    // 函数返回自增后的值；条目不存在时返回 -1（没有行被改动）
+    return typeof res.data === "number" ? res.data : -1;
+  },
+
   /* ---------------- 管理侧（Day 23） ----------------
      权限全部在服务端：六条 *_admin_* RLS 策略只认 admins 表里的人，
      前端这里的每个方法都只是「入口」，非管理员调用会被 RLS 拒掉。 */
