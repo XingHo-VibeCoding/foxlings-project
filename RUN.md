@@ -126,8 +126,16 @@
 
 **Day 20~21 起：页面数据不再读这些文件** —— 前端经 `js/api.js` 直连云数据库（托管后端），
 `data/*.json` 降级为**种子源头**：改内容 → `node db/json-to-sql.js --single`（条目）/ `node db/posts-to-sql.js --single`（帖子）
-→ 把生成的语句灌入库。表结构与 RLS 闸门的权威文档见 `db/schema.sql` 与 `api-contract.md` 第四/五节
-（四张表均已建好：items 23 条、posts 7 条、reports 1 条种子、profiles 空表等真实用户填写）。
+→ 把生成的语句灌入库。表结构与 RLS 闸门（含全部 15 条策略）的权威定义见 `db/schema.sql`，
+策略语义说明见 `api-contract.md` 第四/五节（五张表均已建好：items 23 条、posts 7 条、reports 1 条种子、profiles/admins 各 1 行）。
+
+**三个脚本都可以反复跑，不会毁数据**（Day 21 起，验收见 `docs/day21-acceptance.md` 第 ① 项）：
+`db/schema.sql` 全部用 `IF NOT EXISTS` / `DROP POLICY IF EXISTS` / `CREATE OR REPLACE`；
+`db/json-to-sql.js` 走 `ON CONFLICT (id) DO UPDATE`，**不 TRUNCATE、不碰 views/created_at、不删除已移除条目**
+（要下架条目请显式执行 `DELETE FROM items WHERE id = '…'`）；
+`db/posts-to-sql.js` 走 `ON CONFLICT (title) WHERE author_id = 'seed' DO UPDATE`（靠新增的部分唯一索引
+`idx_posts_seed_title`），**不再 `TRUNCATE … RESTART IDENTITY CASCADE`** —— 旧做法重跑会连真实用户的帖子一起清空、
+并重置 id 序列，现在只同步站方种子帖，id 保持稳定。
 
 ## 部署
 

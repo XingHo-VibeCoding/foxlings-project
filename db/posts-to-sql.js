@@ -17,6 +17,19 @@
      ② author_id 用 'seed'：权限列由服务端 auth.uid() 填，客户端永不传。
         种子是站方代发，故给一个固定的非用户标识 —— 真实用户 uid 是随机串，
         不会与 'seed' 相撞，因此种子帖在 RLS 下只可能以「已通过」身份被人看到。
+
+   Day 21 变更（可重复执行）：**去掉 TRUNCATE，改成按标题 upsert**。
+     旧版完整模式是 `TRUNCATE TABLE posts RESTART IDENTITY CASCADE; INSERT …` ——
+     重跑不报错，但会把**所有帖子连同真实用户的帖子一起清空**，并把 id 序列重置；
+     旧版 --single 更是纯粹追加，跑两次就等于把种子帖灌成两份。
+     现在两种模式输出同一条 upsert：
+       · 冲突键 = 标题，且**只在 author_id = 'seed' 上生效**
+         （靠 db/schema.sql 里的部分唯一索引 idx_posts_seed_title）；
+         真实用户帖不在索引覆盖范围内，可以随便取同名标题；
+       · 命中就纠正内容 —— 于是 id 稳定、不会重复追加、也不会动别人的帖子。
+     刻意不更新的列：`updated_at`（每次跑都改它＝第二轮就不再幂等，鉴权意义也没有）、
+       `id`（GENERATED ALWAYS，本来就不许写）、`author_id`（种子的固定身份）。
+     要下架某条种子帖，请显式执行 `DELETE FROM posts WHERE title = '…' AND author_id = 'seed';`。
    ============================================================================ */
 
 const fs = require("fs");
@@ -28,6 +41,12 @@ const SRC = path.join(ROOT, "data", "posts.json");
 const CATS = ["求助溯源", "已解决", "经验讨论"];
 const STATUSES = ["pending", "approved", "rejected"];
 const SEED_AUTHOR_ID = "seed";   // 站方种子标识（非用户 uid）
+
+/** 列表里写进 INSERT 的列（不含 id：GENERATED ALWAYS 不许写） */
+const COLS = ["category", "title", "body", "author_id", "author_name", "item_id", "status", "replies", "created_at"];
+
+/** upsert 命中时**不更新**的列 */
+const KEEP_ON_CONFLICT = ["title", "author_id", "updated_at"];
 
 /** SQL 字面量：单引号翻倍；空值一律 NULL */
 function q(v) {
@@ -70,14 +89,21 @@ function main() {
     ].join(", ") + ")"
   );
 
+  // 冲突键是「标题」，但只在种子行上生效 —— 谓词必须与 idx_posts_seed_title 的定义逐字对应
+  const updates = COLS
+    .filter((c) => !KEEP_ON_CONFLICT.includes(c))
+    .map((c) => "  " + c + " = EXCLUDED." + c)
+    .join(",\n");
+
   const insert =
-    "INSERT INTO posts (category, title, body, author_id, author_name, item_id, status, replies, created_at) VALUES\n" +
-    rows.join(",\n") + ";";
+    "INSERT INTO posts (" + COLS.join(", ") + ") VALUES\n" +
+    rows.join(",\n") +
+    "\nON CONFLICT (title) WHERE author_id = '" + SEED_AUTHOR_ID + "' DO UPDATE SET\n" + updates + ";";
 
   if (process.argv.includes("--single")) {
     process.stdout.write(insert + "\n");
     if (skipped.length) process.stderr.write("[warn] 已跳过：" + skipped.join("；") + "\n");
-    process.stderr.write("[ok] 生成单条 INSERT，" + good.length + " 条帖子\n");
+    process.stderr.write("[ok] 生成单条 upsert（ON CONFLICT DO UPDATE），" + good.length + " 条帖子\n");
     return;
   }
 
@@ -85,11 +111,13 @@ function main() {
   out.push("-- 本文件由 db/posts-to-sql.js 从 data/posts.json 自动生成，请勿手工编辑。");
   out.push("-- 生成时间：" + new Date().toISOString());
   out.push("-- 帖子数：" + good.length + (skipped.length ? "（跳过 " + skipped.length + " 条非法）" : ""));
+  out.push("--");
+  out.push("-- 可重复执行：按标题 upsert（冲突范围仅限 author_id = 'seed'，见 db/schema.sql 的 idx_posts_seed_title）。");
+  out.push("-- 刻意不做的事：不 TRUNCATE（旧版会连真实用户的帖子一起清空并重置 id 序列）；");
+  out.push("--               不更新 updated_at / author_id；不删除 data/posts.json 里已移除的帖子");
+  out.push("--               （下架请显式执行 DELETE FROM posts WHERE title = '…' AND author_id = 'seed';）。");
   out.push("");
   out.push("BEGIN;");
-  out.push("");
-  out.push("-- 幂等重灌：种子数据可反复执行（id 由序列重新生成，不要写死引用）");
-  out.push("TRUNCATE TABLE posts RESTART IDENTITY CASCADE;");
   out.push("");
   out.push(insert);
   out.push("");
@@ -98,7 +126,7 @@ function main() {
 
   process.stdout.write(out.join("\n"));
   if (skipped.length) process.stderr.write("[warn] 已跳过：" + skipped.join("；") + "\n");
-  process.stderr.write("[ok] 生成 " + good.length + " 条 INSERT\n");
+  process.stderr.write("[ok] 生成 " + good.length + " 条 upsert（可重复执行）\n");
 }
 
 main();

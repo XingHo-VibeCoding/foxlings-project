@@ -1,5 +1,5 @@
 -- ============================================================================
--- schema.sql — 数据表结构定稿（Day 16）
+-- schema.sql — 数据表结构 + RLS 闸门定稿（Day 16 建档 · Day 21 修订为可重复执行）
 --
 -- 目标：**表结构先定下来，后面每个接口都在同一套字段上工作，不会每屏各造一套。**
 -- 字段命名与 api-contract.md 第一节**完全一致**，接口层不做改名/映射。
@@ -7,25 +7,39 @@
 -- 方言：PostgreSQL 15+（JSONB 支持好）。若目标库是 MySQL 8：
 --       JSONB → JSON、SMALLINT 原样、TIMESTAMPTZ → DATETIME、BIGSERIAL → BIGINT AUTO_INCREMENT。
 --
--- 当前状态（Day 21）：三张表都已在托管后端的云库**建好并灌入种子**。
---           items 23 条（md5 双端指纹校验逐字一致）；posts 7 条（6 approved + 1 pending 样例）。
---           前端已全部切到云库（js/api.js），data/*.json 降级为种子源头（db/*-to-sql.js 的输入）。
---           执行通道：托管后端的 exec_sql（**一次只收一条语句**），种子由 --single 模式生成。
---           本文件仍是表结构 + RLS 闸门的**权威文档**（实际策略以 api-contract.md 第五节为准）。
---           ⚠️ 平台事实：未登录时 auth.uid() 返回字符串 'anon'（不是 NULL）——
---           涉权限的策略必须写 TO authenticated，见 api-contract.md 第四节。
---           pg_trgm 扩展未启用（托管环境未装扩展），站内检索先用 ILIKE 兜底（数据量小，够用）。
+-- ── 契约：本脚本**可以连续执行任意次**（幂等，Day 21 定稿）──
+--   ① 所有建表/建索引带 IF NOT EXISTS；策略先 DROP POLICY IF EXISTS 再 CREATE；
+--   ② 函数用 CREATE OR REPLACE；
+--   ③ **不删任何数据**，也不重置浏览量等活数据。
+--   验证过的执行方式：把 { BEGIN…COMMIT } 之间的语句逐条送入托管后端 exec_sql
+--   （该通道一次只收一条语句），连跑两轮零报错，事后 SELECT 行数不变。
+--   ⚠️ 唯一注意：`DROP POLICY IF EXISTS` + `CREATE POLICY` 之间有一个极短的窗口，
+--      生产环境应整包在事务里执行（见文件首尾的 BEGIN/COMMIT），不要在高峰期单条上线。
 --
--- 生成种子数据：
---   node db/json-to-sql.js > db/seed.sql     # 由 data/data.json 生成 INSERT
---   psql -d foxlings -f db/schema.sql
---   psql -d foxlings -f db/seed.sql
+-- 当前状态（Day 21）：
+--   五张表 + 一个函数 + 十五条 RLS 策略**全部在托管后端云库落地**，本文件是权威定义
+--   （此前 14 条策略只存在于云端、仓库里只有 1 条，属"照仓库重建库会建出没闸门的表"的隐患，Day 21 补齐）。
+--   items 23 条种子；posts 7 条（6 approved + 1 pending 样例）；reports/profiles/admins 各若干。
+--   前端已全部切到云库（js/api.js），data/*.json 降级为种子源头（db/*-to-sql.js 的输入）。
+--   执行通道：托管后端的 exec_sql（**一次只收一条语句**），种子由 --single 模式生成。
+--   ⚠️ 平台事实：未登录时 auth.uid() 返回字符串 'anon'（不是 NULL）——
+--      涉权限的策略必须写 TO authenticated，见 api-contract.md 第四节。
+--   pg_trgm 扩展已于 Day 21 确认可装（此前"未装"的注释作废），三元组索引正常建立。
+--
+-- 幂等性验证记录（Day 21）：整包拆成 60 条语句执行多轮 —— 第 1 轮补齐缺失的索引，
+--   此后每轮前后九项状态全等；两个种子脚本（items / posts）同样连跑两轮零报错，
+--   并额外做了反证：「改坏一条标题 → 重灌 → 逐字还原」、「库里与种子文件不一致 → 重灌 → 对齐」。
+--   完整证据见 docs/day21-acceptance.md 第 ① 项。
+--
+-- 灌种子的正确姿势（两种，都幂等）：
+--   node db/json-to-sql.js > db/seed.sql   # 完整脚本：INSERT … ON CONFLICT (id) DO UPDATE
+--   node db/json-to-sql.js --single        # 单条 INSERT（托管后端 exec_sql 用）
 -- ============================================================================
 
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- ① items — 核查条目（当前唯一在用的表；前端 data.json 的数据库形态）
+-- ① items — 核查条目（榜单与详情页的唯一数据源）
 --
 -- 关于 sources：**不拆成独立表**，用 JSONB 内嵌。
 --   理由：每条只有 2–5 个信源，读法永远是「跟着条目一起取」，拆表只会平白多一次 JOIN；
@@ -33,7 +47,7 @@ BEGIN;
 --   什么时候该拆：出现「按信源反查所有条目」「统计某机构被引用次数」这类需求时再拆，
 --   那时用 JSONB 也能平滑迁出（jsonb_array_elements 一行 SQL 就能转表）。
 -- ---------------------------------------------------------------------------
-CREATE TABLE items (
+CREATE TABLE IF NOT EXISTS items (
   id          TEXT        PRIMARY KEY,                  -- 如 '20261005-01'
   title       TEXT        NOT NULL,                     -- ≤30 字
   verdict     TEXT        NOT NULL                      -- 四档结论（CHECK 与前端 VERDICTS 同步）
@@ -59,13 +73,13 @@ COMMENT ON COLUMN items.views IS '真实浏览量：详情页每被一台设备�
 COMMENT ON COLUMN items.cross_check IS '多源比对结论；NULL 或非法值一律按「信源不足」降级';
 
 -- 榜单主查询：先按时间档过滤 updated_at，再按 heat 排序
-CREATE INDEX idx_items_board     ON items (updated_at DESC, heat DESC);
-CREATE INDEX idx_items_verdict   ON items (verdict);
+CREATE INDEX IF NOT EXISTS idx_items_board   ON items (updated_at DESC, heat DESC);
+CREATE INDEX IF NOT EXISTS idx_items_verdict ON items (verdict);
 -- 站内关键词检索（L1）。注意：中文分词需要 pg_jieba / zhparser 扩展；
 -- 未装扩展时先用三元组模糊匹配兜底，够 2000 条以内的规模用。
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX idx_items_title_trgm   ON items USING gin (title   gin_trgm_ops);
-CREATE INDEX idx_items_summary_trgm ON items USING gin (summary gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_items_title_trgm   ON items USING gin (title   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_items_summary_trgm ON items USING gin (summary gin_trgm_ops);
 
 -- ---------------------------------------------------------------------------
 -- ①-b bump_item_view —— 热度算法里「点击量」那一半的来源（Day 23 新增）
@@ -87,8 +101,6 @@ CREATE INDEX idx_items_summary_trgm ON items USING gin (summary gin_trgm_ops);
 -- 「你是不是第一次来」，那件事由前端 localStorage 拦在调用之前（js/detail.js）。
 -- 代价说清楚：换浏览器、清缓存、开无痕，同一个人的同一条都会再算一次。
 -- 当前规模（浏览量个位数）接受这个误差；将来要更准，得加「访客 × 条目 × 天」日志表。
---
--- ⚠️ 托管环境的 exec_sql **一次只收一条语句**：CREATE FUNCTION 与 GRANT 要分两次发。
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION bump_item_view(p_id text)
 RETURNS integer
@@ -110,13 +122,14 @@ GRANT EXECUTE ON FUNCTION bump_item_view(text) TO anon, authenticated;
 COMMENT ON FUNCTION bump_item_view(text) IS '给某条核查 +1 次浏览，返回自增后的值；条目不存在返回 -1。SECURITY DEFINER，是 items 只读闸门上唯一放行「+1」的通道';
 
 -- ---------------------------------------------------------------------------
--- ② posts — 论坛帖子（Day 21 已启用）
+-- ② posts — 论坛帖子（Day 21 启用）
 --   author_id 由服务端 auth.uid() 填，客户端不许传（RLS 拒伪造）；未登录时为 'anon'，
 --   但插入策略限定 TO authenticated，所以未登录者实际插不进 —— 发帖必须登录。
---   status 的状态机只能由站方管理通道推进（无 UPDATE 策略）：客户端想直接插 approved 会被拒。
+--   status 的状态机只能由站方管理通道推进：本人插入只允许 pending（posts_insert_own），
+--   之后只能由管理员经 posts_admin_update 改。
 --   author_name 是展示昵称（发帖时用户自己填），永不参与权限判断。
 -- ---------------------------------------------------------------------------
-CREATE TABLE posts (
+CREATE TABLE IF NOT EXISTS posts (
   id          BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   category    TEXT        NOT NULL DEFAULT '求助溯源'   -- 三选一，与前端 POST_CATS 同步
               CHECK (category IN ('求助溯源', '已解决', '经验讨论')),
@@ -135,17 +148,23 @@ CREATE TABLE posts (
 
 COMMENT ON TABLE posts IS 'F3 论坛帖子：公开列表只出 approved；pending 仅作者与审核人可见。发帖必须登录（插入策略 TO authenticated）';
 
-CREATE INDEX idx_posts_feed ON posts (status, created_at DESC);
-CREATE INDEX idx_posts_item ON posts (item_id) WHERE item_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_posts_feed ON posts (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_item ON posts (item_id) WHERE item_id IS NOT NULL;
+
+-- 种子帖的「自然键」（Day 21）：让 db/posts-to-sql.js 能按标题 upsert，而不必
+-- TRUNCATE（旧做法会把真实用户的帖子一起清空、并重置 id 序列）。
+-- **只覆盖 author_id = 'seed' 的站方种子帖** —— 真实用户不受影响，可以随便取同名标题。
+-- 改这个索引的定义，必须同步改 db/posts-to-sql.js 里的 ON CONFLICT 谓词，否则冲突推断会失败。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_seed_title ON posts (title) WHERE author_id = 'seed';
 
 -- ---------------------------------------------------------------------------
--- ③ reports — 用户提交的线索（Day 21 已启用）
+-- ③ reports — 用户提交的线索（Day 21 启用）
 --   允许未登录提交：author_id 落 'anon'（平台对未登录的固定标识）。
 --   读策略只给 authenticated 的「自己的行」—— 匿名线索对客户端不可见，
 --   否则任何访客都能把所有人匿名提交的线索读走（它们全是 'anon'）。
 --   上线前需补：匿名提交的频控/人机验证（RLS 只管「谁」，不管「多快」）。
 -- ---------------------------------------------------------------------------
-CREATE TABLE reports (
+CREATE TABLE IF NOT EXISTS reports (
   id         BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   text       TEXT        NOT NULL CHECK (char_length(text) BETWEEN 5 AND 500),
   url        TEXT,                                      -- 可选：原始链接
@@ -158,7 +177,7 @@ CREATE TABLE reports (
 
 COMMENT ON TABLE reports IS '用户提交的待核查线索：未登录可提交（author_id 落 anon）；客户端只能回读登录后自己提交的';
 
-CREATE INDEX idx_reports_queue ON reports (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_reports_queue ON reports (status, created_at);
 
 -- ---------------------------------------------------------------------------
 -- ④ profiles — 用户资料（Day 22 新增：昵称 / 个性签名 / 头像）
@@ -172,7 +191,7 @@ CREATE INDEX idx_reports_queue ON reports (status, created_at);
 --   RLS 一律 TO authenticated（未登录连读都不给）：论坛访客看到的作者昵称
 --   来自 posts.author_name 这个冗余字段，不需要读这张表。
 -- ---------------------------------------------------------------------------
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
   user_id      TEXT        PRIMARY KEY DEFAULT auth.uid(),  -- 权限字段；新建时客户端不传，由服务端填
   nickname     TEXT        NOT NULL CHECK (char_length(btrim(nickname)) BETWEEN 1 AND 20),
   bio          TEXT        NOT NULL DEFAULT '' CHECK (char_length(bio) <= 80),
@@ -186,9 +205,9 @@ CREATE TABLE profiles (
 COMMENT ON TABLE profiles IS '用户资料：昵称与头像公开显示在论坛帖子上；签名只在个人主页。头像文件在云存储 shared/<uid>/avatars/，本表只存路径';
 
 -- ---------------------------------------------------------------------------
--- ⑤ admins —— 管理员名单（Day 23）
---    名单本身无任何写策略：加/撤管理员走站方管理通道，客户端改不了。
---    各表 *_admin_* 策略用 EXISTS 子查询认它，权限真身在这里，前端只是入口。
+-- ⑤ admins — 管理员名单（Day 23）
+--   名单本身无任何写策略：加/撤管理员走站方管理通道，客户端改不了。
+--   各表 *_admin_* 策略用 EXISTS 子查询认它，权限真身在这里，前端只是入口。
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS admins (
   user_id     TEXT PRIMARY KEY,
@@ -196,14 +215,112 @@ CREATE TABLE IF NOT EXISTS admins (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+COMMENT ON TABLE admins IS '管理员名单：各表 *_admin_* 策略经 EXISTS 认它；无写策略，加人走站方通道';
 
--- 本人只能确认「我是不是管理员」，读不到名单全表
+-- ---------------------------------------------------------------------------
+-- ⑥ RLS 闸门 —— 五张表 15 条策略（Day 21 定稿 · Day 22 增 profiles · Day 23 增 admins 与管理策略）
+--
+-- 三条不变量（也是 api-contract.md 第五节的机器可读版）：
+--   1. 五张表**全部开启行级安全**（ENABLE ROW LEVEL SECURITY）；没策略 = 拒绝，是默认态；
+--   2. 涉权限的策略一律 TO authenticated —— 因为未登录的 auth.uid() 是 'anon' 不是 NULL，
+--      开给 anon 等于把「只读自己的」变成「读所有人的」（见 api-contract.md 第四节）；
+--   3. 所有管理策略判定式同一个：EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid())。
+--
+-- 幂等写法：每条策略都先 DROP POLICY IF EXISTS 再建 —— 重复执行不报错，且策略定义永远随文件走。
+-- ---------------------------------------------------------------------------
+
+-- 6.1 先开闸（对已开启者重复执行是空操作）
+ALTER TABLE items    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE posts    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reports  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admins   ENABLE ROW LEVEL SECURITY;
+
+-- 6.2 items：公开只读，**无任何客户端写策略**
+--     浏览量不走写策略，走 bump_item_view() 这个 SECURITY DEFINER 窄口（见 ①-b）。
+--     管理员可删条目（删榜单）；注意「不能改热度」是函数签名保证的，不是靠策略。
+DROP POLICY IF EXISTS items_read_all ON items;
+CREATE POLICY items_read_all ON items
+  FOR SELECT TO anon, authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS items_admin_delete ON items;
+CREATE POLICY items_admin_delete ON items
+  FOR DELETE TO authenticated
+  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
+
+-- 6.3 posts：公开列表只出 approved；作者总能看见自己的（含 pending/rejected）；
+--     插入只能插成「自己的 + pending」；状态机推进只有管理员能动。
+DROP POLICY IF EXISTS posts_read ON posts;
+CREATE POLICY posts_read ON posts
+  FOR SELECT TO anon, authenticated
+  USING (status = 'approved' OR author_id = auth.uid());
+
+DROP POLICY IF EXISTS posts_insert_own ON posts;
+CREATE POLICY posts_insert_own ON posts
+  FOR INSERT TO authenticated
+  WITH CHECK (author_id = auth.uid() AND status = 'pending');
+
+DROP POLICY IF EXISTS posts_admin_read ON posts;
+CREATE POLICY posts_admin_read ON posts
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
+
+DROP POLICY IF EXISTS posts_admin_update ON posts;
+CREATE POLICY posts_admin_update ON posts
+  FOR UPDATE TO authenticated
+  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
+
+DROP POLICY IF EXISTS posts_admin_delete ON posts;
+CREATE POLICY posts_admin_delete ON posts
+  FOR DELETE TO authenticated
+  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
+
+-- 6.4 reports：未登录可提交（插成 'anon' 自己），但**读不回**自己的匿名行；
+--     登录者只能读自己提交的；管理员可读全部、可删。
+DROP POLICY IF EXISTS reports_insert ON reports;
+CREATE POLICY reports_insert ON reports
+  FOR INSERT TO anon, authenticated
+  WITH CHECK (NOT (author_id IS DISTINCT FROM auth.uid()));
+
+DROP POLICY IF EXISTS reports_read_own ON reports;
+CREATE POLICY reports_read_own ON reports
+  FOR SELECT TO authenticated
+  USING (author_id = auth.uid());
+
+DROP POLICY IF EXISTS reports_admin_read ON reports;
+CREATE POLICY reports_admin_read ON reports
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
+
+DROP POLICY IF EXISTS reports_admin_delete ON reports;
+CREATE POLICY reports_admin_delete ON reports
+  FOR DELETE TO authenticated
+  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
+
+-- 6.5 profiles：登录者可读全表（头像昵称要显示给别的读者），只能写自己那行。
+DROP POLICY IF EXISTS profiles_read_signed_in ON profiles;
+CREATE POLICY profiles_read_signed_in ON profiles
+  FOR SELECT TO authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS profiles_insert_own ON profiles;
+CREATE POLICY profiles_insert_own ON profiles
+  FOR INSERT TO authenticated
+  WITH CHECK (user_id = auth.uid());
+
+DROP POLICY IF EXISTS profiles_update_own ON profiles;
+CREATE POLICY profiles_update_own ON profiles
+  FOR UPDATE TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- 6.6 admins：本人只能确认「我是不是管理员」，读不到名单全表；无任何写策略。
+DROP POLICY IF EXISTS admins_read_self ON admins;
 CREATE POLICY admins_read_self ON admins
   FOR SELECT TO authenticated
   USING (user_id = auth.uid());
-
-COMMENT ON TABLE admins IS '管理员名单：各表 *_admin_* 策略经 EXISTS 认它；无写策略，加人走站方通道';
 
 COMMIT;
 
@@ -214,7 +331,8 @@ COMMIT;
 --                              [AND verdict = $verdict] [AND (title||summary) ILIKE '%'||$q||'%']
 --                              ORDER BY heat DESC LIMIT $limit OFFSET $offset
 --   GET  /api/items/:id      → SELECT * FROM items WHERE id = $1
---   POST /api/search         → L3：先走上面的 items 查询做站内命中，再走联网搜索 + AI 整合
+--   POST /api/search         → L3：先走上面的 items 查询做站内命中，再走 AI 拆解指路
+--   POST /rpc/bump_item_view → SELECT bump_item_view($id)  —— 唯一改 items 的通道（只能 +1）
 --   GET  /api/posts          → SELECT * FROM posts WHERE status = 'approved' ORDER BY created_at DESC
 --                              （RLS 的 posts_read 完成过滤；登录者额外看得到自己的 pending）
 --   POST /api/posts          → INSERT INTO posts (category, title, body, author_name, item_id)
