@@ -90,7 +90,15 @@
         另新增 F12 从源码层堵住通往坏结果的唯一那条路：
         论坛不许出现管理侧的 listAllPosts / listAllReports（读了全量等于
         把审核闸门从数据库搬到前端把守）。
-        硬门槛总数 111 → 112。 */
+        硬门槛总数 111 → 112。
+     ④ Day 21 第三周验收：复验挖出一个真 bug —— `.card.pop { animation: popIn .45s both }`
+        的 `both` 把动画结束后的 transform 长期锁住，CSS 动画优先级又压过 :hover 普通声明，
+        于是「卡片悬停上移」在现场从来没生效过（只有阴影变深）。
+        **旧断言为什么没拦住**：它只查 `transform !== 'none'`，而动画留下的单位矩阵
+        `matrix(1,0,0,1,0,0)` 也不是 'none' —— 弱断言式的假绿。
+        修两处：B1 改成**实测 Y 位移是否真的变了**（弱断言 → 强断言），
+        另加 B1b 从源码层堵住根因（`.card.pop` 的动画填充不许是 both/forwards）。
+        硬门槛总数 112 → 113。 */
 const fs = require('fs');
 
 /* playwright-core 与 Edge 的定位（Day 22 修）
@@ -332,12 +340,31 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     O['热度角标实测对比度'] = '页面上没出现 .heat-badge';
   }
 
-  // B1 hover 有反馈
-  await card.hover();
+  // B1 hover 有反馈（Day 21 加固）
+  // 旧写法只查 transform !== 'none' —— 会被入场动画跑完后留下的单位矩阵
+  // matrix(1,0,0,1,0,0) 骗过（它也不是 'none'），于是「悬停其实没动」照样绿。
+  // 改成实测 Y 位移到底变没变。
+  const yOfCard = () => card.evaluate((el) => {
+    const t = getComputedStyle(el).transform;
+    return t && t !== 'none' ? new DOMMatrixReadOnly(t).m42 : 0;
+  });
+  // 先把鼠标移开再量基准值，免得上一段交互的悬停残留让基准本身就是 -4
+  await page.mouse.move(0, 0);
   await page.waitForTimeout(400);
-  R['B1_卡片hover有反馈'] = (await card.evaluate((el) => getComputedStyle(el).transform)) !== 'none';
+  const hoverYBefore = await yOfCard();
+  await card.hover();
+  await page.waitForTimeout(450);
+  const hoverYAfter = await yOfCard();
   await page.mouse.move(0, 0);
   await page.waitForTimeout(300);
+  // 断言「真的向上位移了」，而不是「transform 不等于 none」
+  R['B1_卡片hover有反馈'] = hoverYAfter < hoverYBefore;
+  O['B1_hover位移px'] = hoverYBefore + ' → ' + hoverYAfter;
+
+  // B1b 根因护栏（源码层）：卡片入场动画不许用 both/forwards 填充
+  // —— 那会把动画结束后的 transform 长期锁住，压掉 :hover 的位移（Day 21 实测踩过）
+  R['B1b_入场动画不长期占用transform'] =
+    !/\.card\.pop\s*\{[^}]*animation\s*:[^;}]*\b(both|forwards)\b/.test(css);
 
   /* ---- B5 触控尺寸：首页所有可点按钮 ---- */
   const tooSmall = await page.evaluate(() =>

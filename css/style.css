@@ -755,7 +755,10 @@ body {
 /* ---------- 动画 ---------- */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes popIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-.card.pop { animation: popIn .45s both; }
+/* 入场动画的填充模式必须是 backwards，不能是 both/forwards：
+   both 会把动画结束后的 transform:none 一直保留，而 CSS 动画的优先级压过 :hover 的普通声明，
+   结果是 .card:hover 的 translateY(-4px) 永远不生效（Day 21 复验实测发现）。 */
+.card.pop { animation: popIn .45s backwards; }
 
 /* ============================================
    Day 22 · 个性化（头像 / 资料表单）
