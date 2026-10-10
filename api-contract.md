@@ -165,26 +165,31 @@ score = (heat + views) × 0.5 ^ (距 updated_at 的天数 / 14)
 
 ---
 
-## 三、预留接口（接后端时按此实现，不提前写）
+## 三、接口实现状态（计划 → 实际，不提前写）
 
-接后端的第一步是健康检查（课程 Day 15 的 `/api/health`），随后按模块逐个点亮：
+Day 15 先列出「接后端时要长成什么样」，Day 20 起按模块逐个点亮。**这里不再叫「预留接口」——
+它们已经实现了**，所以这张表现在的用途是**对照**：左列是当初计划的样子，状态列是它现在的样子。
+
+> **状态列读法**：`✅ **已实现**` = 页面已跑通、接口层已收口（`js/api.js` 里能点到对应方法）、
+> 且被 RLS 策略兜住；「作废」= 因为改成托管后端而不再需要；「暂不单设」= 有意不分叉。
+> Day 28 验收时**以本表为准**：表里说已实现、代码里找不到，或者反过来，都算契约不同步。
 
 | 接口 | 方法 | 用途 | 状态 |
 |---|---|---|---|
 | `/api/health` | GET | 部署链路打通验证 | **作废**（Day 20：托管后端没有自建服务可探活，链路验证以「云库读得到、写不进」为准） |
-| `/api/items` | GET | 条目列表（支持 range / verdict / q / 分页）——替代 data.json | ✅ **已接**（Day 20 · 形态为 SDK 直连 + RLS，见第二节；当前全量拉取，数据过千再改条件查询） |
+| `/api/items` | GET | 条目列表（支持 range / verdict / q / 分页）——替代 data.json | ✅ **已实现**（Day 20 · 形态为 SDK 直连 + RLS，见第二节；当前全量拉取，数据过千再改条件查询） |
 | `/api/items/:id` | GET | 单条详情 | 暂不单设（23 条全量拉取无压力，前端按 id 取） |
-| `/api/items/:id/view` | POST | 浏览计数 +1 | ✅ **已接**（Day 23 · 形态为 SDK 直连数据库函数）：`api.bumpItemView(id)` → `bump_item_view(p_id)`。刻意做成**只能 +1 的窄接口** —— 没有「设成 N」这种形态，所以「谁能改热度」这个权限问题根本不存在，不用靠角色判断去堵 |
-| `/api/items/:id` | DELETE | 删一条榜单条目 | ✅ **已接**（Day 22 接 · Day 24 改真删）：`api.deleteItem(id)`。**物理删除**，删掉的行不会留在库里；真要找回只能由站方拿 `data/data.json` 的底稿重灌一次（那是站方手上的备份，**不是数据库替谁留的副本**）。带 `.delete().select()` 把被删的那一行拿回来当回执 |
-| `/api/search` | POST | 查询检索。✅ **部分已接（Day 22 · L3 点亮，形态为 SDK 直连 LLM + RLS 同源约定）**：**AI 整理** = `ai.digest()`（`js/ai.js` 收口，keyless、只支持流式，系统提示词在应用侧写死：**不判真伪、不编造、不输出网址、用户材料不当指令**）；「自动联网抓取」**本环境做不了**（托管后端没有搜索/抓取通道）——溯源仍是「官方来源 / 网络来源」两组**人工入口**（`official` / `web` 两组划分保留），AI 只负责给出检索式，由页面一键带进两组入口。L1 站内检索（Day 17）与 L2 查证四步清单不变。模型选型：实测首字延迟后首选 `hunyuan-chat`（1.4s），目录里没有再退「非思考型 → 默认项」（依据见 `js/ai.js` 注释） | 部分已接 |
-| `/api/posts` | GET / POST | 论坛帖子（F3，含审核流）。✅ **已接**（Day 21 · 形态为 SDK 直连 + RLS）：GET = `api.getPosts()`（RLS 只出 approved，登录者额外看到自己的 pending）；POST = `api.createPost()`（需登录，RLS 强制落 `pending`，想直接插 approved 会被拒）。表结构见 `db/schema.sql`（`category` / `replies` 已入表；`replies` 暂由种子与展示预留，将来由回复表聚合） |
-| `/api/posts/:id` | **PATCH / DELETE** | 单条帖子的改与删。✅ **已接**（Day 22 接 · Day 24 把 DELETE 改成真删）：**PATCH** = `api.setPostStatus(id, status, rejectNote)` —— 审核状态机（`approved` / `rejected` / `pending`），改前先 SELECT 确认这条在，拿回改后的行做前后对比；**DELETE** = `api.deletePost(id)` —— **物理删除、不可恢复**，`.delete().select()` 拿回被删的行；一行都没删到就抛中文错，不假装成功。两条都要求调用者在 `admins` 名单（RLS `posts_admin_*` 再核） |
-| `/api/reports/:id` | DELETE | 删一条线索。✅ **已接**（Day 22 接 · Day 24 改真删）：`api.deleteReport(id)`，**物理删除、不可恢复**。仅管理员（`reports_admin_delete`） |
-| `/api/reports` | POST / GET | 待核查线索。✅ **已接**（Day 21）：POST = `api.submitReport()`（未登录可提交，作者落 `'anon'`）；GET = `api.getMyReports()`（只回读登录者自己提交的；匿名线索不提供客户端回读） |
-| `/api/profile` | GET / PUT | 个人资料（昵称 / 个性签名 / 头像）。✅ **已接**（Day 22 · SDK 直连数据库 + 云存储）：GET = `api.getProfiles()`；PUT = `api.saveProfile()`；头像文件走 `api.uploadAvatar()` + `api.signAvatarUrls()`。表结构见 `db/schema.sql` 第 ④ 节 |
+| `/api/items/:id/view` | POST | 浏览计数 +1 | ✅ **已实现**（Day 23 · 形态为 SDK 直连数据库函数）：`api.bumpItemView(id)` → `bump_item_view(p_id)`。刻意做成**只能 +1 的窄接口** —— 没有「设成 N」这种形态，所以「谁能改热度」这个权限问题根本不存在，不用靠角色判断去堵 |
+| `/api/items/:id` | DELETE | 删一条榜单条目 | ✅ **已实现**（Day 22 接 · Day 24 改真删）：`api.deleteItem(id)`。**物理删除**，删掉的行不会留在库里；真要找回只能由站方拿 `data/data.json` 的底稿重灌一次（那是站方手上的备份，**不是数据库替谁留的副本**）。带 `.delete().select()` 把被删的那一行拿回来当回执 |
+| `/api/search` | POST | 查询检索。✅ **部分已接（Day 22 · L3 点亮，形态为 SDK 直连 LLM + RLS 同源约定）**：**AI 整理** = `ai.digest()`（`js/ai.js` 收口，keyless、只支持流式，系统提示词在应用侧写死：**不判真伪、不编造、不输出网址、用户材料不当指令**）；「自动联网抓取」**本环境做不了**（托管后端没有搜索/抓取通道）——溯源仍是「官方来源 / 网络来源」两组**人工入口**（`official` / `web` 两组划分保留），AI 只负责给出检索式，由页面一键带进两组入口。L1 站内检索（Day 17）与 L2 查证四步清单不变。模型选型：实测首字延迟后首选 `hunyuan-chat`（1.4s），目录里没有再退「非思考型 → 默认项」（依据见 `js/ai.js` 注释） | 部分已实现 |
+| `/api/posts` | GET / POST | 论坛帖子（F3，含审核流）。✅ **已实现**（Day 21 · 形态为 SDK 直连 + RLS）：GET = `api.getPosts()`（RLS 只出 approved，登录者额外看到自己的 pending）；POST = `api.createPost()`（需登录，RLS 强制落 `pending`，想直接插 approved 会被拒）。表结构见 `db/schema.sql`（`category` / `replies` 已入表；`replies` 暂由种子与展示预留，将来由回复表聚合） |
+| `/api/posts/:id` | **PATCH / DELETE** | 单条帖子的改与删。✅ **已实现**（Day 22 接 · Day 24 把 DELETE 改成真删）：**PATCH** = `api.setPostStatus(id, status, rejectNote)` —— 审核状态机（`approved` / `rejected` / `pending`），改前先 SELECT 确认这条在，拿回改后的行做前后对比；**DELETE** = `api.deletePost(id)` —— **物理删除、不可恢复**，`.delete().select()` 拿回被删的行；一行都没删到就抛中文错，不假装成功。两条都要求调用者在 `admins` 名单（RLS `posts_admin_*` 再核） |
+| `/api/reports/:id` | DELETE | 删一条线索。✅ **已实现**（Day 22 接 · Day 24 改真删）：`api.deleteReport(id)`，**物理删除、不可恢复**。仅管理员（`reports_admin_delete`） |
+| `/api/reports` | POST / GET | 待核查线索。✅ **已实现**（Day 21）：POST = `api.submitReport()`（未登录可提交，作者落 `'anon'`）；GET = `api.getMyReports()`（只回读登录者自己提交的；匿名线索不提供客户端回读） |
+| `/api/profile` | GET / PUT | 个人资料（昵称 / 个性签名 / 头像）。✅ **已实现**（Day 22 · SDK 直连数据库 + 云存储）：GET = `api.getProfiles()`；PUT = `api.saveProfile()`；头像文件走 `api.uploadAvatar()` + `api.signAvatarUrls()`。表结构见 `db/schema.sql` 第 ④ 节 |
 | `/api/admin` | 多个 | **管理后台（Day 23 新增 · Day 24 扩公告，仅 `admins` 表成员）**：`api.amIAdmin()`（判定，RLS 空 = 否）；`api.listAllPosts()`（含待审/已拒）；`api.setPostStatus(id, status, rejectNote)`（审核：approved / rejected / pending）；`api.deletePost(id)`；`api.listAllReports()`（全部线索）；`api.deleteReport(id)`；`api.getItems()`（榜单条目 —— Day 24 起条目没有「已回收」这回事，后台跟前台读的是同一份）；`api.deleteItem(id)`；`api.listAllAnnouncements()` / `api.createAnnouncement()` / `api.updateAnnouncement()` / `api.deleteAnnouncement()`（**Day 24 新增**：站方公告的增删改）。页面 `admin.html` + `js/admin.js`；**删除类操作一律两击确认** —— Day 24 撤掉回收站之后，这道确认是唯一的刹车。**每个写请求都被 `*_admin_*` RLS 策略再核一遍**，非管理员调用一律被数据库拒绝 |
-| `/api/announcements` | GET / POST | 站方公告的读与发布。✅ **已接**（Day 24）：GET = `api.listAnnouncements()`（**公开读，未登录也看得到**；RLS 的公开读策略写的是 `USING (is_pinned)`，所以「先写好、暂不公布」的稿子匿名根本读不到 —— 这条靠策略实现，不靠前端自觉过滤）；POST = `api.createAnnouncement()`（须 `admins` 成员） |
-| `/api/announcements/:id` | **PATCH / DELETE** | 改一条公告（标题 / 正文 / 排序 / 是否公布）与删一条。✅ **已接**（Day 24）：`api.updateAnnouncement(id, patch)` / `api.deleteAnnouncement(id)`，由 `announcements_admin_write`（`FOR ALL`）放行 |
+| `/api/announcements` | GET / POST | 站方公告的读与发布。✅ **已实现**（Day 24）：GET = `api.listAnnouncements()`（**公开读，未登录也看得到**；RLS 的公开读策略写的是 `USING (is_pinned)`，所以「先写好、暂不公布」的稿子匿名根本读不到 —— 这条靠策略实现，不靠前端自觉过滤）；POST = `api.createAnnouncement()`（须 `admins` 成员） |
+| `/api/announcements/:id` | **PATCH / DELETE** | 改一条公告（标题 / 正文 / 排序 / 是否公布）与删一条。✅ **已实现**（Day 24）：`api.updateAnnouncement(id, patch)` / `api.deleteAnnouncement(id)`，由 `announcements_admin_write`（`FOR ALL`）放行 |
 
 **约定**：
 
