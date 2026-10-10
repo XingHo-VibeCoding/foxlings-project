@@ -147,7 +147,9 @@ score = (heat + views) × 0.5 ^ (距 updated_at 的天数 / 14)
 | `/api/reports/:id` | DELETE | 删一条线索。✅ **已接**（Day 22）：`api.deleteReport(id)`，**软删除**（回收后作者自己也看不到，但行还在，可整体还原）。仅管理员（`reports_admin_delete`） |
 | `/api/reports` | POST / GET | 待核查线索。✅ **已接**（Day 21）：POST = `api.submitReport()`（未登录可提交，作者落 `'anon'`）；GET = `api.getMyReports()`（只回读登录者自己提交的；匿名线索不提供客户端回读） |
 | `/api/profile` | GET / PUT | 个人资料（昵称 / 个性签名 / 头像）。✅ **已接**（Day 22 · SDK 直连数据库 + 云存储）：GET = `api.getProfiles()`；PUT = `api.saveProfile()`；头像文件走 `api.uploadAvatar()` + `api.signAvatarUrls()`。表结构见 `db/schema.sql` 第 ④ 节 |
-| `/api/admin` | 多个 | **管理后台（Day 23 新增，仅 `admins` 表成员）**：`api.amIAdmin()`（判定，RLS 空 = 否）；`api.listAllPosts()`（含待审/已拒）；`api.setPostStatus(id, status, rejectNote)`（审核：approved / rejected / pending）；`api.deletePost(id)`；`api.listAllReports()`（全部线索）；`api.deleteReport(id)`；`api.deleteItem(id)`（榜单条目）。页面 `admin.html` + `js/admin.js`；危险操作两击确认。**每个写请求都被 `*_admin_*` RLS 策略再核一遍**，非管理员调用一律被数据库拒绝。**Day 22 修订**：三个删除方法改为**软删除**语义，改/删一律先做 id 存在性预检（查无此 id 返回中文错误），审核方法改为返回改后的行 |
+| `/api/admin` | 多个 | **管理后台（Day 23 新增，仅 `admins` 表成员）**：`api.amIAdmin()`（判定，RLS 空 = 否）；`api.listAllPosts()`（含待审/已拒）；`api.setPostStatus(id, status, rejectNote)`（审核：approved / rejected / pending）；`api.deletePost(id)`；`api.listAllReports()`（全部线索）；`api.deleteReport(id)`；`api.listAllItems()`（**Day 22 新增**：全部条目含已回收）；`api.deleteItem(id)`；`api.restorePost(id)` / `api.restoreItem(id)` / `api.restoreReport(id)`（**Day 22 新增**：把已回收的行恢复回来）。页面 `admin.html` + `js/admin.js`；危险操作两击确认（恢复是可逆方向，不设确认）。**每个写请求都被 `*_admin_*` RLS 策略或函数内自检再核一遍**，非管理员调用一律被数据库拒绝。**Day 22 修订**：三个删除方法改为**软删除**语义，改/删一律先做 id 存在性预检（查无此 id 返回中文错误），审核方法改为返回改后的行 |
+| `/rpc/restore_item` | **POST** | 恢复已回收的榜单条目。✅ **已接**（Day 22）：`api.restoreItem(id)` → 数据库函数 `restore_item(p_id text)`。**窄口函数**：函数体内只写 `is_deleted = false` 一列 —— 因为「热度不可篡改」这条铁律靠的是「items 根本没有 UPDATE 策略」，若为了恢复去加一条 UPDATE 策略，`heat` / `views` / `verdict` 就一并交到管理员手上了。两道门都在库里：① 函数级 EXECUTE 只给 `authenticated`（匿名连函数体都进不去）；② 函数体内再核一次 `admins` 名单 |
+| `/rpc/restore_report` | **POST** | 恢复已回收的线索。✅ **已接**（Day 22）：`api.restoreReport(id)` → `restore_report(p_id bigint)`，同上窄口（reports 同样没有 UPDATE 策略） |
 
 **约定**：
 
@@ -175,7 +177,7 @@ score = (heat + views) × 0.5 ^ (距 updated_at 的天数 / 14)
 
 ---
 
-## 五、五张表的 RLS 闸门（Day 21 定稿 · Day 22 增 profiles · Day 23 增 admins 与管理策略）
+## 五、五张表的 RLS 闸门（Day 21 定稿 · Day 22 增 profiles / 恢复读 · Day 23 增 admins 与管理策略）
 
 | 表 | 策略 | 角色 | 内容 |
 |---|---|---|---|
@@ -254,11 +256,17 @@ PostgREST 在不索要返回值时一律回 `204`，前端据此提示「操作�
 | 读策略 | 过滤 `is_deleted` | 理由 |
 |---|---|---|
 | `items_read_all` / `posts_read` / `reports_read_own` | ✅ | 公开榜单、论坛、我的线索都不该出现已回收的行 |
-| `posts_admin_read` / `reports_admin_read` | ❌ **刻意不过滤** | 后台必须看得见已回收的内容，否则无法恢复 |
+| `posts_admin_read` / `reports_admin_read` / `items_admin_read` | ❌ **刻意不过滤** | 后台必须看得见已回收的内容，否则无法恢复 |
 
 > **只标记不过滤 = 删了等于没删**（界面骗人，数据还在还能被读到）；
 > **连管理读也过滤 = 再也找不回**。两者之间那条线，就是软删的正确形态。
 > 实现细节见 `docs/day22-crud-loop.md` 第三节。
+>
+> ⚠️ **同一张表有两条 SELECT 策略时，它们是 OR 关系** —— 所以「公开读过滤 / 管理读不过滤」
+> 这个设计会带来一个连带后果：**管理员会话下，光靠 RLS 会把已回收的行一起带出来**。
+> 因此**所有展示用途的读必须在 JS 层显式写死过滤**（`api.getItems()` / `api.getPosts()` 都带
+> `.eq("is_deleted", false)`）。不能指望「策略恰好挡住」—— 那是把两件事混成一件。
+> （Day 22 加 `items_admin_read` 时才暴露出来：之前 `getItems()` 不带过滤是对的，加了管理读之后就不对了。）
 
 ### 6.4 验证方法：数据库 SELECT 前后对比
 
@@ -293,4 +301,45 @@ UPDATE posts SET is_deleted = false WHERE id = 29 RETURNING id, is_deleted;
 **③ 探针式（可复现）**：`verify/probe-day22-exists.js` —— 对「存在的 id」与「不存在的 id」
 各跑一遍读路径，断言前者有行、后者 0 行，证明存在性预检的判断依据可靠（实测记录见
 `docs/day22-crud-loop.md`）。
+
+### 6.5 恢复通道 —— 「删错了」还得能捞回来（Day 22 补）
+
+软删除有两半：**打标记 + 读路径过滤**（6.3）与**让操作者看得见、能撤回来**（本节）。
+少掉第二半，用户看到的是「点了删除它还在」，于是反复点击 —— 这正是线上真实反馈踩出来的坑
+（`docs/day22-crud-loop.md` 第十节）。
+
+**同一个「恢复」，在三张表上是两条不同路径**，差别来自各自的权限设计：
+
+| 表 | 恢复方式 | 为什么 |
+|---|---|---|
+| `posts` | 走**现成的** `posts_admin_update` 策略（`UPDATE … SET is_deleted=false`） | posts 没有「某列绝对不许改」的铁律，一条策略放行整表 UPDATE 可以接受 |
+| `items` / `reports` | 走**窄口 RPC 函数** `restore_item` / `restore_report` | 这两张表**没有 UPDATE 策略**，而 `items` 的「热度不可篡改」正是靠这一点保证的 —— 加一条 UPDATE 策略会连 `heat` / `views` 一起放开 |
+
+**窄口函数的「窄」在哪**：函数体内只有一条 `UPDATE … SET is_deleted = false`，
+调用方无论传什么参数都够不到 `heat`。这与 `bump_item_view`（参数里连数字都没有）
+是同一个思路 —— **能窄到那个程度，就不给它宽的可能**。
+
+两道门，都在数据库里（前端只是入口）：
+
+1. **函数级 EXECUTE 只给 `authenticated`** —— 匿名连函数体都进不去。
+   ⚠️ 平台事实：托管库有 **DEFAULT PRIVILEGES**，函数一创建，平台就自动把 EXECUTE 授给
+   `anon` / `authenticated` / `service_role`。所以**光写 `REVOKE … FROM PUBLIC` 不够**
+   （那只会移除 ACL 里的 `=X` 项，`anon=X` 依然留着），必须把 `anon` 显式写进 REVOKE 名单。
+2. **函数体内再核一次 `admins` 名单**，不在名单里抛中文错误（`42501`）。
+   这段判断不能省：`SECURITY DEFINER` 会把 RLS 绕过去，它就是唯一防线。
+   `auth.uid()` 读的是请求里的 JWT claim（GUC），与函数的安全上下文无关，
+   所以在 `SECURITY DEFINER` 里依然拿得到**调用者**身份。
+
+**实测**（`verify/probe-day22-restore-role.sql`：用 `set_config` 把当前角色切成 `authenticated`，
+再塞一个「不是管理员」的 sub —— 这就是普通登录用户调用时数据库看到的样子）：
+
+| 调用方 | 结果 |
+|---|---|
+| 匿名 → `POST /rpc/restore_item` | `401` + `permission denied for function restore_item`（连函数体都没进） |
+| 非管理员（`authenticated`） | 函数体内拦下：`只有管理员可以恢复条目` + `SQLSTATE=42501` |
+| 管理员（`authenticated` + 真实 uid） | 成功：`is_deleted true → false`，返回恢复后的行 |
+| 未知 id / 没在回收站里 | `P0002` + 中文说明（如「不需要恢复」） |
+
+**后端入口**：`api.restorePost(id)` / `api.restoreItem(id)` / `api.restoreReport(id)`。
+前端**不给「恢复」设两击确认** —— 确认只留给不可逆的那一步。
 

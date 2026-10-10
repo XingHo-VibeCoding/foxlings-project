@@ -489,3 +489,142 @@ SELECT id, status, is_deleted, updated_at FROM posts WHERE id IN (28, 29);
 - **靶子状态复核**（SQL）：`id=28` → `status=approved` / `is_deleted=true`；`id=29` → `is_deleted=true`。两条均符合预期，公网 `GET /posts` 只剩 6 条。
 - **仍待人工**：登录后台看一眼「已回收」徽标、点一次「恢复」（应立刻回到论坛页）。
 - **仍待我**：等上述确认后，物理清理两个靶子（关保险 → 删 → 开保险）。
+
+---
+
+## 十二、收尾：把「回收站」做成完整的一扇门（2026-10-10 晚）
+
+第十节修好了「删掉之后看得见」，但只覆盖 `posts`。这一轮把剩下的欠账一次结清：
+**`items` / `reports` 也给了恢复入口**，并顺手修掉一个由它带出来的读口径问题。
+
+### 12.1 先清理：两个测试靶子物理清除
+走「关保险 → 删 → 开保险」：`posts` 触发器先 `DISABLE`，`DELETE FROM posts WHERE id IN (28,29)`
+（`RETURNING` 拿到 28、29 两行 = 真的删掉了），再 `ENABLE` 恢复保险。
+事后复核：`posts` 回到 7 条、三个触发器全在岗、`sum(views)` 未变。
+
+### 12.2 为什么这两张表不能照抄 `posts` 的做法
+
+`posts` 的恢复走一条现成的 `posts_admin_update` 策略 —— 那条策略放行的是**整表 UPDATE**，
+管理员因此能顺手改 `heat` 一类的字段。对 posts 这没问题。
+
+**对 `items` 不行**：「热度不可篡改」是本项目的铁律，而它现在靠的是
+**「items 根本没有 UPDATE 策略」**——硬得不能再硬。一旦为了恢复去加一条 UPDATE 策略，
+`heat` / `views` / `verdict` 就一并交到管理员手上，铁律立刻从「数据库不可能」降级成「靠人自觉」。
+
+→ 所以 `items` / `reports` 走**窄口 RPC 函数**（`restore_item` / `restore_report`）：
+函数体内只有一条 `UPDATE … SET is_deleted = false`，**调用方无论传什么参数都够不到 heat**。
+这与 `bump_item_view` 是同一个思路：能窄到那个程度，就不给它宽的可能。
+
+**顺带解决了一个真实缺口**：`items` 原先只有公开读策略（带 `NOT is_deleted`），
+**后台根本看不见已回收的条目** —— 恢复入口无处安放。补一条 `items_admin_read`
+（管理员可读全部，不过滤 `is_deleted`），与 `posts_admin_read` 的形态对齐。
+
+### 12.3 ⚠️ 由 `items_admin_read` 带出的读口径问题（**这条最重要**）
+
+同一张表的两条 SELECT 策略是 **OR** 关系。加了 `items_admin_read` 之后，
+**管理员会话下 `getItems()` 会把已回收的条目一起带出来** —— 首页榜单会冒出回收项。
+
+之前 `getItems()` 不带过滤是对的（那时只有一条公开读策略），加了管理读之后就**不对了**。
+`getPosts()` 其实一直存在同类隐患（`posts_admin_read` 早就有了），只是没人从这个角度看过。
+
+修法：**展示用途的读一律在 JS 层显式写死 `.eq("is_deleted", false)`**，不靠策略恰好挡住。
+「策略管**能不能读**，查询管**要读什么**」—— 两件事，不能混成一件。
+
+| 方法 | 口径 | 过滤 |
+|---|---|---|
+| `api.getItems()` / `api.getPosts()` | 展示 | ✅ `.eq("is_deleted", false)` |
+| `api.listAllItems()` / `listAllPosts()` / `listAllReports()` | 管理（回收站视图） | ❌ 不过滤 |
+
+### 12.4 平台事实：`REVOKE … FROM PUBLIC` 不足以关门
+
+窄口函数要给 `items` 的恢复开一道门，门自然越少越好。第一版的写法是先收 PUBLIC 再只发登录用户：
+
+```sql
+REVOKE ALL ON FUNCTION restore_item(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION restore_item(text) TO authenticated;
+```
+
+实测发现**匿名仍然进得去函数体**（拿到的是函数内抛的中文错误，而不是「没权限调函数」）。
+查 ACL 才看清原因：
+
+```
+{anon=X/…, authenticated=X/…, service_role=X/…, cloudbase_postgres_postgres_…=X/…}
+```
+
+**`=X`（PUBLIC）那一项确实没了 —— 但 `anon=X` 还在。** 说明托管库配了 **DEFAULT PRIVILEGES**：
+函数一创建，平台就自动把 EXECUTE 授给 `anon` / `authenticated` / `service_role`。
+`REVOKE … FROM PUBLIC` 只动 PUBLIC 项，动不了平台显式授予的那几项。
+
+修法是把 `anon` 显式写进 REVOKE 名单：
+
+```sql
+REVOKE ALL ON FUNCTION restore_item(text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION restore_report(bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION restore_item(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION restore_report(bigint) TO authenticated;
+```
+
+改完后匿名拿到的是 `permission denied for function restore_item`（`42501`）—— 门真的关上了。
+
+### 12.5 验证
+
+**① 真实角色模拟**（`verify/probe-day22-restore-role.sql`）—— 这一段是本节最有分量的证据：
+用 `set_config` 把当前角色切成 `authenticated`、并塞一个「不是管理员」的 `sub`，
+**这正是普通登录用户调用时数据库看到的样子**。这类验证比桩测试更硬，因为它跑在真实角色与真实函数上。
+
+| 场景 | 实测结果 |
+|---|---|
+| 非管理员调 `restore_item` | `只有管理员可以恢复条目` + `SQLSTATE=42501` |
+| 非管理员调 `restore_report` | `只有管理员可以恢复线索` + `SQLSTATE=42501` |
+| **管理员**调 `restore_item`（造了一条已回收条目） | `OK id=day22-restore-probe is_deleted=false`，`is_deleted: true → false` |
+| **管理员**调 `restore_report`（造了一条已回收线索） | `OK id=18 is_deleted=false`，`is_deleted: true → false` |
+
+同时这条也**实测坐实了一个关键前提**：`auth.uid()` 在 `SECURITY DEFINER` 函数内
+依然读得到**调用者**身份（日志里 `uid=0000-not-an-admin`）——
+它不是读「当前函数所属角色」，而是读请求里的 JWT claim。
+
+**② 匿名侧 RPC 探针**（`verify/probe-day22-restore-rpc.js`，5/5 PASS）：
+匿名调两个 RPC 各得 `401 permission denied for function`；
+匿名 `PATCH items`（改 `is_deleted` / 改 `heat`）**仍是 401 `permission denied for table items`**
+—— 说明挂了两个新函数之后，「items 没有 UPDATE 策略」这条铁律**没有被削弱**；
+匿名 `GET items` 仍只看得到未回收的。
+
+**③ 单元级**（`verify/probe-day22-restore-unit.js`，13 条断言）：
+桩掉云客户端、用 `vm` 加载 **`js/api.js` 真实源文件**，覆盖
+帖子的 4 条（走策略）+ 条目/线索的 4 条（走 RPC）+ 展示口径的 3 条 + 错误映射 2 条。
+**正向 13/13 PASS；反向（同一套断言跑 Day 22 之前的旧版 api.js）0/13 —— 全红**，
+证明这些断言确实在测新代码，不是假绿。
+
+**④ 门槛复跑**：`frontend-rules` **113 ALL_PASS**、`filter-check` **75 ALL_PASS**。
+
+### 12.6 云库状态复核（改动前后逐项对比）
+
+| 项 | 改动前 | 改动后 | 说明 |
+|---|---|---|---|
+| `items` | 23 | 23 | 测试条目已物理清除 |
+| `posts` | 7 | 7 | 两个靶子已物理清除 |
+| `reports` | 1 | 1 | 测试线索已物理清除 |
+| `sum(views)` | 31 | 31 | **活数据未被触碰** |
+| RLS 策略 | 15 | **16** | +`items_admin_read` |
+| 数据库函数 | 2 个自建 | **4 个自建** | +`restore_item` / `restore_report` |
+| 软删触发器 | 3 在岗 | 3 在岗 | 保险全程未落下 |
+
+> 落库方式同 Day 21：语句 base64 暂存 `fx_scratch` 临时表 → 回读**逐条逐字校验**
+> （84 条语句，合并 md5 指纹 `6684d7a7f2a0848b`）→ 一句固定 DO 块循环执行 → 用完 `DROP`。
+> 中途踩到一个**顺序坑**（与 Day 21 同源）：第一版把 `ALTER TABLE … DISABLE TRIGGER` 之类
+> 与服务无关的语句混排在前面没问题，但**新增函数必须排在它引用的列与策略之后** —— 已按此定序。
+
+### 12.7 改动文件清单（本轮）
+
+| 文件 | 改动 | 归属 |
+|---|---|---|
+| `db/schema.sql` | 新增 `items_admin_read` 策略；新增 `restore_item` / `restore_report` 函数与函数级权限；头部状态与接口对应段同步 | **Day 22**（晚·回收站） |
+| `js/api.js` | 新增 `listAllItems()` / `restoreItem()` / `restoreReport()` / `callRestoreRpc()` / `describeRestoreError()`；`getItems()` / `getPosts()` 补 `is_deleted` 过滤 | **Day 22**（晚·回收站） |
+| `js/admin.js` | 条目列表改走管理读；条目与线索的已回收行都加「已回收」+「恢复」；删除后改为整体重载（不再本地摘除） | **Day 22**（晚·回收站） |
+| `api-contract.md` | 登记 `/rpc/restore_item`、`/rpc/restore_report` 标 ✅；`/api/admin` 补三个新方法；6.3 表格补 `items_admin_read` 与 OR 关系说明；新增 6.5「恢复通道」 | **Day 22**（晚·回收站） |
+| `docs/day22-crud-loop.md` | 本节 | **Day 22** |
+| `verify/probe-day22-restore-unit.js` | 恢复通道单元探针（合并版，13 条断言，含反向验证入口） | 工作区工装 |
+| `verify/probe-day22-restore-rpc.js` | 匿名侧 RPC 拒止探针（5 条） | 工作区工装 |
+| `verify/probe-day22-restore-role.sql` | 真实角色模拟脚本（留档，可复跑） | 工作区工装 |
+
+> `css/style.css` 本轮**一行未改** —— 「已回收」徽标复用上一轮就加好的 `.tag-recycled`。

@@ -65,7 +65,9 @@ async function loadAll() {
 
   ALL_POSTS = await safe("帖子读取", () => api.listAllPosts(), []);
   ALL_REPORTS = await safe("线索读取", () => api.listAllReports(), []);
-  ALL_ITEMS = await safe("条目读取", () => api.getItems(), []);
+  // 条目走**管理读**（api.listAllItems）而不是展示用的 getItems —— 差别就是「含不含已回收的」。
+  // 后台必须看得见回收站里的东西，否则恢复入口无处安放（Day 22 的教训）。
+  ALL_ITEMS = await safe("条目读取", () => api.listAllItems(), []);
   renderPending();
   renderAllPosts();
   renderItems();
@@ -287,7 +289,9 @@ function renderItems() {
   const box = document.getElementById("items-list");
   const count = document.getElementById("items-count");
   if (!box) return;
-  count.textContent = "共 " + ALL_ITEMS.length + " 条";
+  const recycledCount = ALL_ITEMS.filter((it) => it.is_deleted === true).length;
+  count.textContent = "共 " + ALL_ITEMS.length + " 条" +
+    (recycledCount ? "（其中已回收 " + recycledCount + " 条）" : "");
 
   const kw = itemKeyword.trim();
   const list = kw
@@ -301,28 +305,50 @@ function renderItems() {
 
   box.innerHTML = "";
   list.forEach((it) => {
+    const recycled = it.is_deleted === true;
     const el = document.createElement("div");
     el.className = "admin-row";
     el.innerHTML =
+      (recycled ? '<span class="tag tag-recycled">已回收</span>' : "") +
       verdictTag(it.verdict) +
       '<span class="admin-row-title">' + escHtml(it.title) + "</span>" +
       '<span class="admin-row-meta">' + escHtml(it.updated_at || "") + "</span>" +
       '<div class="admin-row-actions">' +
-        '<button type="button" class="admin-btn-danger" data-act="del">删除</button>' +
+        (recycled
+          ? '<span class="admin-row-meta">公网已看不到它，数据还在</span>' +
+            '<button type="button" class="admin-btn-ghost" data-act="restore">恢复</button>'
+          : '<button type="button" class="admin-btn-danger" data-act="del">删除</button>') +
       "</div>" +
       '<p class="compose-note" role="status"></p>';
 
-    el.querySelector('[data-act="del"]').addEventListener("click", async (e) => {
+    const delBtn = el.querySelector('[data-act="del"]');
+    if (delBtn) delBtn.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       if (!armDangerous(btn)) return;
       btn.disabled = true;
       try {
         await api.deleteItem(it.id);
-        ALL_ITEMS = ALL_ITEMS.filter((x) => x.id !== it.id);
-        renderItems();
+        // 删除后**整体重载**，而不是本地把这一行摘掉：软删除的行还在库里，
+        // 重载它才会带上「已回收」标记。若本地摘掉，下次刷新它又冒出来 ——
+        // 在用户眼里就是「点了没反应」（Day 22 踩过这个坑，条目这里别再踩第二遍）。
+        await loadAll();
       } catch (err) {
         btn.disabled = false;
         rowSay(el.querySelector(".compose-note"), escHtml(err.message || "删除失败。"), false);
+      }
+    });
+
+    const restoreBtn = el.querySelector('[data-act="restore"]');
+    if (restoreBtn) restoreBtn.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      // 恢复是可逆方向，**不设两击确认** —— 确认只留给不可逆的那一步
+      btn.disabled = true;
+      try {
+        await api.restoreItem(it.id);
+        await loadAll();
+      } catch (err) {
+        btn.disabled = false;
+        rowSay(el.querySelector(".compose-note"), escHtml(err.message || "恢复失败。"), false);
       }
     });
 
@@ -358,7 +384,8 @@ function renderReports() {
         " · " + fmtTime(r.created_at) + "</span>" +
       '<div class="admin-row-actions">' +
         (recycled
-          ? '<span class="admin-row-meta">作者已看不到它，数据还在</span>'
+          ? '<span class="admin-row-meta">作者已看不到它，数据还在</span>' +
+            '<button type="button" class="admin-btn-ghost" data-act="restore">恢复</button>'
           : '<button type="button" class="admin-btn-danger" data-act="del">删除</button>') +
       "</div>" +
       '<p class="compose-note" role="status"></p>';
@@ -370,11 +397,23 @@ function renderReports() {
       btn.disabled = true;
       try {
         await api.deleteReport(r.id);
-        ALL_REPORTS = ALL_REPORTS.filter((x) => x.id !== r.id);
-        renderReports();
+        await loadAll();   // 同条目列表：重载才会显示「已回收」，本地摘掉会造成「点了没反应」的错觉
       } catch (err) {
         btn.disabled = false;
         rowSay(el.querySelector(".compose-note"), escHtml(err.message || "删除失败。"), false);
+      }
+    });
+
+    const reportRestore = el.querySelector('[data-act="restore"]');
+    if (reportRestore) reportRestore.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;   // 可逆方向，不设两击确认
+      try {
+        await api.restoreReport(r.id);
+        await loadAll();
+      } catch (err) {
+        btn.disabled = false;
+        rowSay(el.querySelector(".compose-note"), escHtml(err.message || "恢复失败。"), false);
       }
     });
 

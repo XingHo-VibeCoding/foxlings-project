@@ -144,16 +144,62 @@ async function fetchRowOrThrow(table, id, label) {
   return row;
 }
 
+/* ---------------- 恢复通道（Day 22）：RPC 窄口函数 ----------------
+
+   为什么不复用 UPDATE 策略：见 api.restoreItem 的注释（items 的「不能改热度」靠
+   「没有 UPDATE 策略」保证，加策略等于把 heat 一起交出去）。
+
+   这里只做两件事：把「参数都没给」这种低级错误提前拦住；把数据库的报错翻成人话。
+   后端主动抛的中文说明（「只有管理员可以恢复条目」/「没有处于已回收状态」）已经够清楚，
+   直接透传给用户，不再包装一层 —— 多说一层反而把原因说糊了。 */
+async function callRestoreRpc(fnName, args, label) {
+  const id = args && args.p_id;
+  if (id === undefined || id === null || id === "") {
+    const e = new Error("缺少" + label + " id，没法恢复。");
+    e.code = "BAD_ARG";
+    throw e;
+  }
+
+  const res = await getCloudClient().database.rpc(fnName, args);
+  if (res && res.error) {
+    const e = new Error(describeRestoreError(res.error, label));
+    e.code = res.error.code;
+    throw e;
+  }
+  // 函数返回「恢复后的那一行」（RETURNS items / reports）
+  console.log("[api] 已恢复" + label + " " + id + "：is_deleted true → false（公网 GET 会重新返回它）");
+  return res && res.data;
+}
+
+/** 恢复失败 → 人话。注意网关会给数据库错误码加 DATABASE_ 前缀（Day 22 实测） */
+function describeRestoreError(error, label) {
+  const code = String((error && error.code) || "").replace(/^DATABASE_/, "");
+  const msg = String((error && error.message) || "");
+  // 匿名调 RPC 时到这里：函数的 EXECUTE 权限只给了 authenticated
+  if (/permission denied for function/i.test(msg)) return "恢复需要先登录，而且账号要有管理权限。";
+  // 42501 / P0002 都是函数体内主动抛的中文说明（权限不足 / 不在回收站里），直接给用户看
+  if (code === "42501" || code === "P0002") return msg;
+  return "恢复" + label + "失败：" + (msg || code || "未知错误");
+}
+
 const api = {
   /* ---------------- 核查条目（读） ---------------- */
 
   /**
-   * 读接口：取全部核查条目。
+   * 读接口：取全部核查条目（**展示口径**：不含已回收的）。
    * 返回条目数组（字段与 data/data.json 完全一致，不做改名/映射 —— 见 api-contract.md）。
    * 出错时抛出，由页面按四态规范渲染错误态。
+   *
+   * ⚠️ 这里的 `.eq("is_deleted", false)` 不是多余的：items 有**两条 SELECT 策略**
+   *    （items_read_all 给所有人、items_admin_read 给管理员），策略之间是 **OR** ——
+   *    管理员会话下光靠 RLS 会把已回收的条目一起带出来。展示口径必须显式写死，
+   *    不能指望「策略恰好挡住」。（Day 22 加 items_admin_read 时才暴露出来的连带影响。）
    */
   async getItems() {
-    const data = unwrap(await getCloudClient().database.from("items").select("*"), "条目读取");
+    const data = unwrap(
+      await getCloudClient().database.from("items").select("*").eq("is_deleted", false),
+      "条目读取"
+    );
     return Array.isArray(data) ? data : [];
   },
 
@@ -170,6 +216,7 @@ const api = {
       await getCloudClient().database
         .from("posts")
         .select("*")
+        .eq("is_deleted", false)   // 展示口径：和 getItems 同理 —— posts_admin_read 是 OR 上的另一条策略
         .order("created_at", { ascending: false })
         .order("id", { ascending: false }),
       "帖子读取"
@@ -417,6 +464,41 @@ const api = {
       "帖子读取"
     );
     return Array.isArray(data) ? data : [];
+  },
+
+  /**
+   * 管理读：取全部核查条目，**含已回收的**（后台的回收站视图）。
+   * 由 items_admin_read 策略放行（只有 admins 表里的人拿得到）；普通访客拿到的是空。
+   * 与 getItems() 的差别就是「要不要 is_deleted 那一句」—— 这正是软删除的正确形态：
+   * **公开读过滤、管理读不过滤**，后台才看得见可恢复的东西。
+   */
+  async listAllItems() {
+    const data = unwrap(
+      await getCloudClient().database.from("items")
+        .select("*").order("updated_at", { ascending: false }),
+      "条目读取（管理）"
+    );
+    return Array.isArray(data) ? data : [];
+  },
+
+  /**
+   * 恢复已回收条目 / 线索（Day 22）。
+   *
+   * 走的是 **RPC 窄口函数**（restore_item / restore_report），不是 UPDATE 策略 ——
+   * 原因是 items 的「热度不可篡改」这条铁律，靠的是「items 根本没有 UPDATE 策略」。
+   * 若为了恢复去加一条 UPDATE 策略，heat / views / verdict 就一并交到管理员手上了，
+   * 铁律立刻从「数据库不可能」降级成「靠人自觉」。窄口函数里只写 `is_deleted = false` 一列，
+   * 调用方无论传什么参数都够不到 heat。
+   *
+   * 安全不在这一层：函数级 EXECUTE 只给 authenticated（匿名连函数体都进不去），
+   * 函数体内再核一次 admins 名单 —— 两道门都在数据库里。
+   */
+  async restoreItem(id) {
+    return callRestoreRpc("restore_item", { p_id: id }, "条目");
+  },
+
+  async restoreReport(id) {
+    return callRestoreRpc("restore_report", { p_id: id }, "线索");
   },
 
   /**

@@ -220,3 +220,11 @@
   新类只出现在 `admin.html`，首页 `C2b_页面出现的标签` 仍是「假 / 部分属实 / 存疑」三项；
   `V4_实测` 靶子 `14 → 15`、`V5` 同设备再打开仍 15（不重复计数）
 
+- **日期**：2026-10-10 晚（Day 22 · 回收站收尾）（items/reports 恢复入口 + 展示读口径修正 + 发布）
+- **被检查对象**：`js/api.js`（新增 listAllItems / restoreItem / restoreReport，getItems / getPosts 补 is_deleted 过滤）、`js/admin.js`（条目列表改走管理读；条目与线索的已回收行加「恢复」；删除后改为整体重载）
+- **Skill 自身变更**：无
+- **结果**：**ALL_PASS（113 项）**
+- **备注**：`css/style.css` 本轮未改（「已回收」徽标复用 `.tag-recycled`），故 `标签实测对比度` 与 `B1_hover位移px` 数值不变；
+  条目列表新增的「已回收」徽标同样复用该对配色，未引入新色值 → 无需重验对比度；
+  `N7_四态明细` 四项仍为 true；`M1_溢出合计px` 仍 0
+

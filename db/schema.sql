@@ -20,11 +20,13 @@
 --   ⚠️ 走**数据通道**推送时，请求体含 `CREATE TABLE` / `ALTER TABLE` / `TRUNCATE TABLE`
 --      字面会被网关 WAF 回 403 → 一律 base64 暂存后执行（见 RUN.md「DDL 推送」节）。
 --
--- Day 22 新增：**软删除**（is_deleted 标记 + BEFORE DELETE 触发器把 DELETE 改写成标记）。
+-- Day 22 新增：**软删除**（is_deleted 标记 + BEFORE DELETE 触发器把 DELETE 改写成标记），
+--   以及配套的 **恢复入口**（items / reports 走窄口函数，posts 走已有的 UPDATE 策略）。
 --   动机：库里已经有真实用户内容，硬删除删错就找不回来。客户端从此**没有物理删除能力**。
 --
 -- 当前状态（Day 22）：
---   五张表 + 两个函数（bump_item_view / soft_delete_rows）+ 十五条 RLS 策略 + 三个软删触发器
+--   五张表 + 四个函数（bump_item_view / soft_delete_rows / restore_item / restore_report）
+--   + 十六条 RLS 策略 + 三个软删触发器
 --   **全部在托管后端云库落地**，本文件是权威定义。
 --   items 23 条种子；posts 7 条（6 approved + 1 pending 样例）；reports/profiles/admins 各若干。
 --   前端已全部切到云库（js/api.js），data/*.json 降级为种子源头（db/*-to-sql.js 的输入）。
@@ -245,7 +247,7 @@ CREATE TABLE IF NOT EXISTS admins (
 COMMENT ON TABLE admins IS '管理员名单：各表 *_admin_* 策略经 EXISTS 认它；无写策略，加人走站方通道';
 
 -- ---------------------------------------------------------------------------
--- ⑥ RLS 闸门 —— 五张表 15 条策略（Day 21 定稿 · Day 22 增 profiles · Day 23 增 admins 与管理策略）
+-- ⑥ RLS 闸门 —— 五张表 16 条策略（Day 21 定稿 · Day 22 增 profiles 与恢复读 · Day 23 增 admins 与管理策略）
 --
 -- 三条不变量（也是 api-contract.md 第五节的机器可读版）：
 --   1. 五张表**全部开启行级安全**（ENABLE ROW LEVEL SECURITY）；没策略 = 拒绝，是默认态；
@@ -276,6 +278,15 @@ CREATE POLICY items_read_all ON items
 DROP POLICY IF EXISTS items_admin_delete ON items;
 CREATE POLICY items_admin_delete ON items
   FOR DELETE TO authenticated
+  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
+
+-- Day 22 补：管理员需要**看得见已回收的条目**，否则回收站里是空的，恢复入口无处安放。
+-- ⚠️ 两条读策略是 **OR** 关系，所以这条一加，管理员会话下 getItems() 也会带上已回收条目
+--    → 因此所有**展示用**的读必须显式过滤 is_deleted（js/api.js 已加），不能只靠 RLS 兜。
+--    这与 posts 的形态完全一致（posts_read 过滤 / posts_admin_read 不过滤）。
+DROP POLICY IF EXISTS items_admin_read ON items;
+CREATE POLICY items_admin_read ON items
+  FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
 
 -- 6.3 posts：公开列表只出 approved；作者总能看见自己的（含 pending/rejected）；
@@ -398,6 +409,90 @@ CREATE TRIGGER trg_reports_soft_delete BEFORE DELETE ON reports FOR EACH ROW EXE
 
 COMMENT ON FUNCTION soft_delete_rows() IS '把 DELETE 改写成"置 is_deleted 标记"并取消物理删除（Day 22）。SECURITY DEFINER 才能越过 RLS 改写；要真删必须先 DISABLE TRIGGER';
 
+-- ---------------------------------------------------------------------------
+-- 6.8 「恢复」：items / reports 的窄口函数（Day 22 补）
+--
+-- 为什么 posts 能靠 UPDATE 策略恢复、这两张表不能：
+--   posts_admin_update 这条策略放行的是**整表 UPDATE**，管理员因此能顺手改 heat 一类的字段；
+--   posts 没有"某列绝对不能改"的铁律，所以可以接受。
+--   items 不一样 —— **「热度不可篡改」是本项目的铁律**（热度算法是站点的性格）：
+--     它现在由「items 根本没有 UPDATE 策略」来保证，硬得不能再硬。
+--     一旦为了恢复而加一条 UPDATE 策略，就等于把 heat / views / verdict 一起交到管理员手上，
+--     铁律立刻从"数据库不可能"降级成"靠人自觉"。
+--   → 所以这里走**窄口函数**：函数体内只写 `is_deleted = false` 一列，
+--     调用方无论传什么参数都够不到 heat，与 bump_item_view 的思路一脉相承
+--     （能窄到那个程度，就不给它宽的可能）。
+--
+-- 🔒 函数里的管理员自检是**唯一防线**（SECURITY DEFINER 会绕过 RLS）→ 这段判断不能省。
+--    `auth.uid()` 读的是请求里的 JWT claim（GUC），与函数的安全上下文无关，
+--    所以在 SECURITY DEFINER 里依然拿得到**调用者**身份（已实测）。
+--    两道门：① 函数级 EXECUTE 只给 authenticated（匿名连函数都看不见）；
+--            ② 函数体内再核一次 admins 名单（普通登录用户调得进来，但会被中文错误挡掉）。
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION restore_item(p_id text)
+RETURNS items
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE v items;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()) THEN
+    RAISE EXCEPTION '只有管理员可以恢复条目' USING ERRCODE = '42501';
+  END IF;
+
+  UPDATE items SET is_deleted = false
+   WHERE id = p_id AND is_deleted = true
+  RETURNING * INTO v;
+
+  IF v.id IS NULL THEN
+    RAISE EXCEPTION '这条条目没有处于「已回收」状态（id=%），不需要恢复', p_id USING ERRCODE = 'P0002';
+  END IF;
+
+  RETURN v;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION restore_report(p_id bigint)
+RETURNS reports
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE v reports;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()) THEN
+    RAISE EXCEPTION '只有管理员可以恢复线索' USING ERRCODE = '42501';
+  END IF;
+
+  UPDATE reports SET is_deleted = false
+   WHERE id = p_id AND is_deleted = true
+  RETURNING * INTO v;
+
+  IF v.id IS NULL THEN
+    RAISE EXCEPTION '这条线索没有处于「已回收」状态（id=%），不需要恢复', p_id USING ERRCODE = 'P0002';
+  END IF;
+
+  RETURN v;
+END;
+$$;
+
+-- 函数级门：只发给登录用户。
+-- ⚠️ 平台事实（Day 22 实测）：托管库有 **DEFAULT PRIVILEGES** —— 函数一创建，
+--    平台就自动把 EXECUTE 授给了 `anon` / `authenticated` / `service_role`。
+--    所以**光写 `REVOKE ... FROM PUBLIC` 不够**：那只会移除 ACL 里的 `=X`（PUBLIC）项，
+--    `anon=X` 是平台显式授的，依然留着，匿名照样能进函数体。
+--    必须像下面这样**把 anon 一并写进 REVOKE 的名单里**，门才算真关上。
+--    （实测对照：只 REVOKE PUBLIC 时，匿名调用得到的是函数体内的中文错误；
+--      连 anon 一起 REVOKE 后，得到的是 `permission denied for function`。）
+REVOKE ALL ON FUNCTION restore_item(text)   FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION restore_report(bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION restore_item(text)   TO authenticated;
+GRANT EXECUTE ON FUNCTION restore_report(bigint) TO authenticated;
+
+COMMENT ON FUNCTION restore_item(text) IS '恢复已回收条目（Day 22）。窄口：函数体内只改 is_deleted 一列，因此「热度不可篡改」不受影响；SECURITY DEFINER + 管理员自检';
+COMMENT ON FUNCTION restore_report(bigint) IS '恢复已回收线索（Day 22）。窄口：函数体内只改 is_deleted 一列；SECURITY DEFINER + 管理员自检';
+
 COMMIT;
 
 -- ============================================================================
@@ -409,6 +504,8 @@ COMMIT;
 --   GET  /api/items/:id      → SELECT * FROM items WHERE id = $1
 --   POST /api/search         → L3：先走上面的 items 查询做站内命中，再走 AI 拆解指路
 --   POST /rpc/bump_item_view → SELECT bump_item_view($id)  —— 唯一改 items 的通道（只能 +1）
+--   POST /rpc/restore_item   → SELECT restore_item($id)    —— 恢复已回收条目（窄口：只把 is_deleted 置回 false）
+--   POST /rpc/restore_report → SELECT restore_report($id)  —— 恢复已回收线索（同上，仅管理员可调）
 --   GET  /api/posts          → SELECT * FROM posts WHERE status = 'approved' ORDER BY created_at DESC
 --                              （RLS 的 posts_read 完成过滤；登录者额外看得到自己的 pending）
 --   POST /api/posts          → INSERT INTO posts (category, title, body, author_name, item_id)
