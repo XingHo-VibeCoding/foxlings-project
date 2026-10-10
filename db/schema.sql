@@ -1,6 +1,6 @@
 -- ============================================================================
 -- schema.sql — 数据表结构 + RLS 闸门定稿
---   Day 16 建档 · Day 21 修订为可重复执行 · Day 22 加软删除 · Day 24 撤软删除、加公告表
+--   Day 16 建档 · Day 21 修订为可重复执行 · Day 22 加软删除 · Day 24 撤软删除、加公告表与提交频控
 --
 -- 目标：**表结构先定下来，后面每个接口都在同一套字段上工作，不会每屏各造一套。**
 -- 字段命名与 api-contract.md 第一节**完全一致**，接口层不做改名/映射。
@@ -31,9 +31,14 @@
 --   ② **新增 announcements 表**：论坛顶部的站方公告栏（置顶公共栏）。
 --      公开可读；只有 admins 名单里的人能发/改/删 —— 社区规则由站方在后台维护，
 --      页面只负责展示与轮播，规则文案改一次全站生效，不用改代码。
+--   ③ **新增提交频控**（③-b）：`reports` 每天每人最多 5 条，超了当天不再收。
+--      RLS 只管「谁」，管不了「多快」—— 这是继软删除之后同一位置的第二道闸门。
+--      登录按账号计，匿名按客户端 IP 计；拿不到 IP 一律放行（fail-open，
+--      理由与实测见 ③-b 段注释）。
 --
 -- 当前状态（Day 24）：
---   六张表 + 一个函数（bump_item_view）+ 十七条 RLS 策略
+--   六张表 + 两个函数（bump_item_view / enforce_report_rate_limit）
+--   + 一个触发器（trg_reports_rate_limit）+ 十七条 RLS 策略
 --   **全部在托管后端云库落地**，本文件是权威定义。
 --   items 23 条种子；posts 7 条（6 approved + 1 pending 样例）；announcements 2 条；
 --   reports / profiles / admins 各若干。
@@ -181,22 +186,107 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_seed_title ON posts (title) WHERE au
 --   允许未登录提交：author_id 落 'anon'（平台对未登录的固定标识）。
 --   读策略只给 authenticated 的「自己的行」—— 匿名线索对客户端不可见，
 --   否则任何访客都能把所有人匿名提交的线索读走（它们全是 'anon'）。
---   上线前需补：匿名提交的频控/人机验证（RLS 只管「谁」，不管「多快」）。
+--   频控（Day 24 已补）：见下方 ③-b —— RLS 只管「谁」，管不了「多快」。
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS reports (
-  id         BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  text       TEXT        NOT NULL CHECK (char_length(text) BETWEEN 5 AND 500),
-  url        TEXT,                                      -- 可选：原始链接
-  author_id  TEXT        DEFAULT auth.uid(),            -- 未登录落 'anon'；伪造他人署名被 RLS 拒
-  status     TEXT        NOT NULL DEFAULT 'pending'     -- 线索处理流程
-             CHECK (status IN ('pending', 'checking', 'published', 'rejected')),
-  item_id    TEXT        REFERENCES items(id) ON DELETE SET NULL,  -- 核查成稿后回填
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  id           BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  text         TEXT        NOT NULL CHECK (char_length(text) BETWEEN 5 AND 500),
+  url          TEXT,                                      -- 可选：原始链接
+  author_id    TEXT        DEFAULT auth.uid(),            -- 未登录落 'anon'；伪造他人署名被 RLS 拒
+  status       TEXT        NOT NULL DEFAULT 'pending'     -- 线索处理流程
+               CHECK (status IN ('pending', 'checking', 'published', 'rejected')),
+  item_id      TEXT        REFERENCES items(id) ON DELETE SET NULL,  -- 核查成稿后回填
+  -- Day 24 新增：提交来源 IP，只用于匿名提交的每日频控计数。
+  -- **由触发器写入**（客户端传什么都不作数），拿不到时为空。
+  submitter_ip TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE reports IS '用户提交的待核查线索：未登录可提交（author_id 落 anon）；客户端只能回读登录后自己提交的';
+COMMENT ON COLUMN reports.submitter_ip IS '提交来源的客户端 IP（取网关请求头的 x-forwarded-for 首段）—— 只用于匿名提交的每日频控计数；由 enforce_report_rate_limit 触发器写入，客户端传什么都不作数；拿不到 IP 时为空，且不拦。';
 
 CREATE INDEX IF NOT EXISTS idx_reports_queue ON reports (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_reports_submitter_day ON reports (submitter_ip, created_at);
+
+-- ---------------------------------------------------------------------------
+-- ③-b 提交频控 —— enforce_report_rate_limit（Day 24 新增）
+--   规则：**任何人（无论登录与否）每天最多 5 条线索**，超了当天不再收。
+--   为什么放在数据库而不是前端：前端的计数能被清缓存绕过、能被脚本跳过；
+--   而这张表的写入是匿名开放的，唯一的执行点就在数据落库那一刻。
+--
+--   两种身份两种键（这才是「一个人一天五条」的落点）：
+--     · 登录用户 → 按 author_id = auth.uid() 数当天条数（可追溯、可申诉）；
+--     · 匿名访客 → 只能拿客户端 IP 当键（取 x-forwarded-for 首段，逗号前那一段），
+--                  所以计数其实记在 reports.submitter_ip 上。
+--
+--   ⚠️ 两条刻意的设计选择，改动前请先读懂：
+--     ① **阈值只写一个地方**（c_limit）—— 连报错文案都用 %s 拼出来，
+--        免得以后改数字时漏改文案（跟前端门槛里「别写死条数」同一条纪律）。
+--     ② **拿不到 IP 就放行（fail-open）**。反过来写（拿不到就拦）等于把
+--        「网关哪天换了实现」直接变成「全站提交一起死」—— 这个代价远大于少拦几条垃圾。
+--        实测：请求头缺失 / 空串 / 非 JSON / 没有 x-forwarded-for 这四种情况全放行。
+--
+--   已知边界（如实记档）：
+--     · NAT 后面是一群人：教室、校园网、公司 Wi-Fi 往往共用一个出口 IP ——
+--       匿名的 5 条是那一群人的总量，不是每人的。阈值偏紧时先看这条。
+--     · 换 IP 就绕过：IP 限流只是抬高成本，不是防住攻击者（登录侧那一档才真的可追溯）。
+--     · 它只管「提交线索」这一条路。论坛发帖要求登录（posts_insert_own TO authenticated），
+--       同一个登录账号连发 N 条的闸门目前**没有**——形状相同，需要时照这份抄。
+--     · 管理员手动插线索也走这个触发器（按自己的 uid 计数）。
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION enforce_report_rate_limit() RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER                    -- 计数要读到别人的行，匿名调用者没有 SELECT 权限
+SET search_path = public            -- ⚠️ SECURITY DEFINER 必带，否则可被 search_path 劫持
+AS $fn$
+DECLARE
+  c_limit constant int  := 5;                  -- ← 每天上限，唯一的数字
+  c_tz    constant text := 'Asia/Shanghai';    -- 「一天」按北京时间算（库会话时区是 PRC，但别依赖它）
+  v_uid   text := auth.uid();
+  v_hdrs  text;
+  v_ip    text;
+  v_from  timestamptz;
+  v_n     int;
+BEGIN
+  v_from := date_trunc('day', now() AT TIME ZONE c_tz) AT TIME ZONE c_tz;
+
+  -- 取客户端 IP：拿不到就留空（下面据此放行）
+  BEGIN
+    v_hdrs := current_setting('request.headers', true);
+  EXCEPTION WHEN others THEN
+    v_hdrs := NULL;
+  END;
+  IF v_hdrs IS NOT NULL AND v_hdrs <> '' THEN
+    BEGIN
+      v_ip := nullif(btrim(split_part(coalesce(v_hdrs::json ->> 'x-forwarded-for', ''), ',', 1)), '');
+    EXCEPTION WHEN others THEN
+      v_ip := NULL;                            -- 头不是合法 JSON 也当作拿不到
+    END;
+  END IF;
+  NEW.submitter_ip := v_ip;                    -- 服务端说了算，覆盖客户端传来的值
+
+  IF v_uid IS NOT NULL AND v_uid <> 'anon' THEN
+    SELECT count(*) INTO v_n FROM reports WHERE author_id = v_uid AND created_at >= v_from;
+  ELSE
+    IF v_ip IS NULL THEN
+      RETURN NEW;                              -- fail-open（见上方 ②）
+    END IF;
+    SELECT count(*) INTO v_n FROM reports WHERE submitter_ip = v_ip AND created_at >= v_from;
+  END IF;
+
+  IF v_n >= c_limit THEN
+    -- 自定义 SQLSTATE FX429：接口层按码认它（实测网关会加 DATABASE_ 前缀后透传），
+    -- 文案由服务端拼（阈值改了文案跟着改）；这条 message 就是给用户看的那句话。
+    RAISE EXCEPTION USING ERRCODE = 'FX429',
+      MESSAGE = format('今天提交的线索已经到 %s 条上限了（每天最多 %s 条）—— 明天再来；确有急事可以直接联系站方。', c_limit, c_limit);
+  END IF;
+  RETURN NEW;
+END $fn$;
+
+DROP TRIGGER IF EXISTS trg_reports_rate_limit ON reports;
+CREATE TRIGGER trg_reports_rate_limit
+  BEFORE INSERT ON reports
+  FOR EACH ROW EXECUTE FUNCTION enforce_report_rate_limit();
 
 -- ---------------------------------------------------------------------------
 -- ④ profiles — 用户资料（Day 22 新增：昵称 / 个性签名 / 头像）

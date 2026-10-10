@@ -8,6 +8,10 @@
 > 删除回到**真删**（`is_deleted` 列、软删触发器、`restore_*` 函数、回收站读策略全部撤除）。
 > 本文记录的是 Day 22 当时的形态，**保留作为决策演进的过程**；
 > 现状以 `docs/day24-notice-and-real-delete.md` 与 `api-contract.md` 第七节为准。
+>
+> ⚠️ **另一项也于 Day 24 结掉**：本文 §12.8③ 记的「匿名提交频控（未做）」已经做了 ——
+> 形态换成了 `BEFORE INSERT` 触发器（每人每天 5 条），**当初设想的那套 RLS 方案已作废**，
+> 作废原因写在 §12.8③ 里（那是一条会静默失效的写法，值得回头看一眼）。
 
 ---
 
@@ -634,7 +638,7 @@ GRANT EXECUTE ON FUNCTION restore_report(bigint) TO authenticated;
 
 > `css/style.css` 本轮**一行未改** —— 「已回收」徽标复用上一轮就加好的 `.tag-recycled`。
 
-### 12.8 顺手结掉两项「上线前待补」
+### 12.8 顺手结掉两项「上线前待补」（第三项于 Day 24 结掉，见下 ③）
 
 **① 头像签名 URL 续签（做了）**
 
@@ -670,20 +674,26 @@ GRANT EXECUTE ON FUNCTION restore_report(bigint) TO authenticated;
 照样能传任意大的文件；托管平台目前没有暴露桶级的体积/配额配置。
 要真正在服务端拦，只能等平台提供该能力（或改走自建服务层，与 Day 14「静态前端 + 托管后端」的架构决定冲突）。
 
-**③ 匿名提交频控（未做 —— 需要先拍板）**
+**③ 匿名提交频控（Day 24 已做 —— 原方案作废，换了形态）**
 
 `reports` 表对匿名单向开放，RLS 只管「谁」，**管不了「多快」**。这是三项里唯一真正的空白。
 
-已排除的方案：想用请求头（`x-forwarded-for`）当限流键，但探测请求被中止，暂未取到结论；
-即便取到，把请求头当键也需要额外列与策略。
+**最终落地的方案**（细节见 `api-contract.md` 6.5）：`BEFORE INSERT` 触发器 `enforce_report_rate_limit`
+—— **每人每天 5 条**，登录按 `auth.uid()` 计、匿名按客户端 IP（`x-forwarded-for` 首段，
+写进新列 `reports.submitter_ip`）计；拿不到 IP 一律放行（fail-open）；超限抛自定义 SQLSTATE `FX429`
++ 一句由服务端拼好的中文。
 
-**建议方案（两层，都不依赖请求头）**：
+**为什么当初设想的那套（`client_key` + RLS 策略 + 全站兜底）没采用** —— 两个理由，第二个是硬的：
 
-| 层 | 做法 | 作用 |
-|---|---|---|
-| 单设备 | `reports` 加一列 `client_key`（前端生成一个随机串存 `localStorage`，提交时带上）；INSERT 策略里加 `NOT EXISTS (… r.client_key = 新行的 client_key AND r.created_at > now() - interval '60 seconds')` | 同一设备 60 秒最多 1 条 |
-| 全站兜底 | `(SELECT count(*) FROM reports WHERE author_id = 'anon' AND created_at > now() - interval '1 minute') < 10` | 防止清掉 `localStorage` 换个 key 继续刷 |
+1. `client_key` 存在 `localStorage`、由前端生成，**清一次缓存换个串就绕过** ——
+   它跟「前端自己计数」是同一类防线，挡得住手滑、挡不住有意为之；
+2. ⚠️ **更要命的是：把计数写成 RLS 策略里的子查询，对匿名调用者是永远成立的**。
+   `EXISTS (SELECT 1 FROM reports WHERE …)` 这个子查询在策略内执行时**同样受 reports 自己的
+   SELECT 策略约束** —— 而匿名对 `reports` 没有任何 SELECT 策略（这是刻意的：匿名行 `author_id`
+   全是 `'anon'`，放开读等于把所有人的线索交出去）→ **子查询恒返回 0 行 → 条件恒真 → 频控静默失效**。
+   也就是说那套方案上线后会「看起来装好了、实际一条都不拦」—— 正是本项目最防的那种**没有信号的坏**。
+   → 要数得见别人的行，计数逻辑必须跑在 **SECURITY DEFINER 函数**里（以定义者身份读，
+   不受调用者 RLS 影响），这也是触发器方案的形态来源。
 
-**这条要拍板才能动**，因为：① 要给 `reports` 加列；② 要改的正是**匿名提交这条核心路径**的 INSERT 策略 ——
-写错会直接挡住正常用户提交，属于「必须慎之又慎」的那一类改动。
-阈值（60 秒 / 每分钟 10 条）也需要你认可：太紧会误伤，太松等于没拦。
+顺带记一条：这条也回答了 12.1 里那个问题「为什么有些约束放不进 RLS」——
+**RLS 表达得了「谁」，表达不了「多快」，也读不到调用者本该看不见的行。**

@@ -90,6 +90,15 @@ function describeError(error, what) {
   if (code === "23514") return "内容不符合格式要求（标题或正文长度不对）。";
   if (code === "23505") return "这条已经存在了。";
   if (code === "42P01") return "数据表还没建好，请联系站方。";
+  // 提交频控（Day 24）：数据库的 BEFORE INSERT 触发器拦下的超限提交。
+  // 实测（真实通道，见 verify/probe-day24-ratelimit.js）：网关把这个自定义 SQLSTATE
+  // 带上 DATABASE_ 前缀原样透传 —— code="DATABASE_FX429"，上面已经剥掉了前缀；
+  // message 就是给用户看的那句中文，而且**由服务端按当前阈值拼出来**
+  // （「已经到 N 条上限了（每天最多 N 条）」）→ 前端不重复写这个数字，
+  // 以后改阈值只改数据库里那一个常量，这里不用跟着动。
+  if (code === "FX429") {
+    return String((error && error.message) || "").trim() || "今天提交的次数到上限了，明天再来。";
+  }
   return (what || "操作") + "失败：" + (error.message || code || "未知错误");
 }
 
