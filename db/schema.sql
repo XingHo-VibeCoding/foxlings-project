@@ -1,5 +1,6 @@
 -- ============================================================================
--- schema.sql — 数据表结构 + RLS 闸门定稿（Day 16 建档 · Day 21 修订为可重复执行 · Day 22 加软删除）
+-- schema.sql — 数据表结构 + RLS 闸门定稿
+--   Day 16 建档 · Day 21 修订为可重复执行 · Day 22 加软删除 · Day 24 撤软删除、加公告表
 --
 -- 目标：**表结构先定下来，后面每个接口都在同一套字段上工作，不会每屏各造一套。**
 -- 字段命名与 api-contract.md 第一节**完全一致**，接口层不做改名/映射。
@@ -9,26 +10,33 @@
 --
 -- ── 契约：本脚本**可以连续执行任意次**（幂等，Day 21 定稿）──
 --   ① 所有建表/建索引带 IF NOT EXISTS；策略先 DROP POLICY IF EXISTS 再 CREATE；
---      Day 22 起**对已存在表的加列**也写了 `ADD COLUMN IF NOT EXISTS`，且紧跟各自的建表语句
---      —— 位置很关键：必须排在引用该列的**函数与策略之前**，否则会报 42703；
---   ② 函数用 CREATE OR REPLACE；触发器先 DROP TRIGGER IF EXISTS 再 CREATE；
+--   ② 函数用 CREATE OR REPLACE；
 --   ③ **不删任何数据**，也不重置浏览量等活数据。
 --   验证过的执行方式：把 { BEGIN…COMMIT } 之间的语句逐条送入托管后端 exec_sql
 --   （该通道一次只收一条语句），连跑两轮零报错，事后 SELECT 行数不变。
 --   ⚠️ 唯一注意：`DROP POLICY IF EXISTS` + `CREATE POLICY` 之间有一个极短的窗口，
 --      生产环境应整包在事务里执行（见文件首尾的 BEGIN/COMMIT），不要在高峰期单条上线。
---   ⚠️ 走**数据通道**推送时，请求体含 `CREATE TABLE` / `ALTER TABLE` / `TRUNCATE TABLE`
---      字面会被网关 WAF 回 403 → 一律 base64 暂存后执行（见 RUN.md「DDL 推送」节）。
+--   ⚠️ 走**数据通道**（前端 / PostgREST）推送时，请求体含 `CREATE TABLE` / `ALTER TABLE`
+--      / `TRUNCATE TABLE` 字面会被网关 WAF 回 403 → 走 MCP 的 exec_sql（migrate 模式）
+--      不受此限，DDL 一律走那条通道。
 --
--- Day 22 新增：**软删除**（is_deleted 标记 + BEFORE DELETE 触发器把 DELETE 改写成标记），
---   以及配套的 **恢复入口**（items / reports 走窄口函数，posts 走已有的 UPDATE 策略）。
---   动机：库里已经有真实用户内容，硬删除删错就找不回来。客户端从此**没有物理删除能力**。
+-- ── Day 24 变更：一次回退 + 一次新增 ──
+--   ① **撤掉软删除**。Day 22 曾用 BEFORE DELETE 触发器把删除改写成 is_deleted 标记，
+--      给误删留一条找回的路。跑过一轮之后站方（产品决策）认为「没必要留数据，堆着没用」——
+--      删除就该是不可逆的。于是触发器、soft_delete_rows()、restore_item/report、
+--      is_deleted 列、以及为看回收站而设的 items_admin_read 策略**全部移除**，
+--      三条读策略恢复干净形态。
+--      「不可逆」这件事于是回到它该在的位置：**在按钮上做两击确认 + 把话说清楚**
+--      （js/admin.js 的 armDangerous 与「永久删除」文案），而不是在数据库里偷偷留副本。
+--   ② **新增 announcements 表**：论坛顶部的站方公告栏（置顶公共栏）。
+--      公开可读；只有 admins 名单里的人能发/改/删 —— 社区规则由站方在后台维护，
+--      页面只负责展示与轮播，规则文案改一次全站生效，不用改代码。
 --
--- 当前状态（Day 22）：
---   五张表 + 四个函数（bump_item_view / soft_delete_rows / restore_item / restore_report）
---   + 十六条 RLS 策略 + 三个软删触发器
+-- 当前状态（Day 24）：
+--   六张表 + 一个函数（bump_item_view）+ 十七条 RLS 策略
 --   **全部在托管后端云库落地**，本文件是权威定义。
---   items 23 条种子；posts 7 条（6 approved + 1 pending 样例）；reports/profiles/admins 各若干。
+--   items 23 条种子；posts 7 条（6 approved + 1 pending 样例）；announcements 2 条；
+--   reports / profiles / admins 各若干。
 --   前端已全部切到云库（js/api.js），data/*.json 降级为种子源头（db/*-to-sql.js 的输入）。
 --   执行通道：托管后端的 exec_sql（**一次只收一条语句**），种子由 --single 模式生成。
 --   ⚠️ 平台事实：未登录时 auth.uid() 返回字符串 'anon'（不是 NULL）——
@@ -73,21 +81,13 @@ CREATE TABLE IF NOT EXISTS items (
   views       INTEGER     NOT NULL DEFAULT 0            -- 真实浏览量（Day 23）；只能由函数 +1，客户端改不了
               CHECK (views >= 0),
   cross_check TEXT        CHECK (cross_check IN ('相互印证', '存在矛盾', '信源不足')),
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),        -- 入库时间（前端不用，后台审计用）
-  is_deleted  BOOLEAN     NOT NULL DEFAULT false          -- 软删除（Day 22）：true = 已回收，读路径一律跳过
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()         -- 入库时间（前端不用，后台审计用）
 );
-
--- 「加列」必须紧跟「建表」：`CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，
--- 老库不会自动长出这一列 —— 靠这条补。同时它必须排在**任何引用该列的对象之前**
--- （下面的 bump_item_view、以及 ⑥ 节的读策略都引用了 is_deleted），否则建函数/建策略会报 42703。
--- ⚠️ 含 `ALTER TABLE` 字面，走数据通道推送会被网关 WAF 回 403 → 必须 base64（见 RUN.md）。
-ALTER TABLE items ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false;
 
 COMMENT ON TABLE  items IS '核查条目：辟谣榜与详情页的唯一数据源';
 COMMENT ON COLUMN items.heat IS '人工热度 0-100，由编辑填写；缺失/非法时前端回退 0';
 COMMENT ON COLUMN items.views IS '真实浏览量：详情页每被一台设备打开一次 +1，只能经 bump_item_view() 自增；前端拿 (heat + views) 计算榜单热度分';
 COMMENT ON COLUMN items.cross_check IS '多源比对结论；NULL 或非法值一律按「信源不足」降级';
-COMMENT ON COLUMN items.is_deleted IS '软删除标记（Day 22）：true = 条目已回收，公开榜单与详情页都读不到；恢复只需置回 false，数据从未离开过这张表';
 
 -- 榜单主查询：先按时间档过滤 updated_at，再按 heat 排序
 CREATE INDEX IF NOT EXISTS idx_items_board   ON items (updated_at DESC, heat DESC);
@@ -129,7 +129,7 @@ DECLARE
   v integer;
 BEGIN
   UPDATE items SET views = views + 1
-   WHERE id = p_id AND NOT is_deleted              -- 已回收的条目不再计数（Day 22）
+   WHERE id = p_id
   RETURNING views INTO v;
   RETURN COALESCE(v, -1);
 END;
@@ -162,15 +162,10 @@ CREATE TABLE IF NOT EXISTS posts (
   reject_note TEXT,                                     -- 驳回理由（回给作者）
   replies     INTEGER     NOT NULL DEFAULT 0 CHECK (replies >= 0),  -- 展示预留，将来由回复表聚合
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  is_deleted  BOOLEAN     NOT NULL DEFAULT false          -- 软删除（Day 22）：true = 已回收，读路径一律跳过
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 老库补列（同上：CREATE TABLE IF NOT EXISTS 对已存在的表是空操作）
-ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false;
-
 COMMENT ON TABLE posts IS 'F3 论坛帖子：公开列表只出 approved；pending 仅作者与审核人可见。发帖必须登录（插入策略 TO authenticated）';
-COMMENT ON COLUMN posts.is_deleted IS '软删除标记（Day 22）：DELETE 被 BEFORE DELETE 触发器拦下改成置此位，所以客户端发 DELETE 也删不掉真数据，帖子随时可找回';
 
 CREATE INDEX IF NOT EXISTS idx_posts_feed ON posts (status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_item ON posts (item_id) WHERE item_id IS NOT NULL;
@@ -196,15 +191,10 @@ CREATE TABLE IF NOT EXISTS reports (
   status     TEXT        NOT NULL DEFAULT 'pending'     -- 线索处理流程
              CHECK (status IN ('pending', 'checking', 'published', 'rejected')),
   item_id    TEXT        REFERENCES items(id) ON DELETE SET NULL,  -- 核查成稿后回填
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  is_deleted BOOLEAN     NOT NULL DEFAULT false          -- 软删除（Day 22）：true = 已回收，读路径一律跳过
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 老库补列（同上）
-ALTER TABLE reports ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false;
-
 COMMENT ON TABLE reports IS '用户提交的待核查线索：未登录可提交（author_id 落 anon）；客户端只能回读登录后自己提交的';
-COMMENT ON COLUMN reports.is_deleted IS '软删除标记（Day 22）：线索被回收后作者自己也看不到，但行还在，误删可整体还原';
 
 CREATE INDEX IF NOT EXISTS idx_reports_queue ON reports (status, created_at);
 
@@ -247,10 +237,41 @@ CREATE TABLE IF NOT EXISTS admins (
 COMMENT ON TABLE admins IS '管理员名单：各表 *_admin_* 策略经 EXISTS 认它；无写策略，加人走站方通道';
 
 -- ---------------------------------------------------------------------------
--- ⑥ RLS 闸门 —— 五张表 16 条策略（Day 21 定稿 · Day 22 增 profiles 与恢复读 · Day 23 增 admins 与管理策略）
+-- ⑤-b announcements — 站方公告（Day 24 新增）
+--   论坛顶部的「置顶公共栏」数据源：站方发布的通知与社区规则。
+--
+--   为什么不复用 posts：公告与帖子是两种东西 ——
+--     · 说话的人不同：公告只有站方（admins 名单）能发，帖子任何登录用户都能发；
+--     · 生命周期不同：公告长期挂在那儿，帖子会沉下去；
+--     · 展示位置不同：公告在论坛页顶部常驻并轮播，帖子在下面的列表里。
+--   硬塞进 posts 的话，论坛列表、审核队列、前端筛选每一处都要多加一个
+--   「这条是公告、不算帖子」的判断 —— 一处漏了，公告就混进帖子流了。
+--   单独一张表，代价只是多两个接口，换来的是两边逻辑互不干扰。
+--
+--   is_pinned：是否进顶部公共栏。默认 true；置 false 等于「先写好放着、暂不公布」——
+--   Day 24 之后删除是不可逆的（软删除已撤），所以站方需要一个「不删也能摘下来」的档位。
+--   sort_order：排序权重，大的在前（把「社区规则」这类必须常看的顶在最上面）；
+--   同权重时按 id 倒序（新的在前）。前端公告栏按这个顺序轮播。
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS announcements (
+  id         BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title      TEXT        NOT NULL CHECK (char_length(btrim(title)) BETWEEN 2 AND 60),
+  body       TEXT        NOT NULL CHECK (char_length(btrim(body)) BETWEEN 1 AND 2000),
+  is_pinned  BOOLEAN     NOT NULL DEFAULT true,          -- 是否进顶部公共栏
+  sort_order INTEGER     NOT NULL DEFAULT 0,             -- 大的在前；同权重时新的在前
+  author_id  TEXT        NOT NULL DEFAULT auth.uid(),    -- 发布人；种子行是 'seed'
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE announcements IS '站方公告：论坛顶部置顶公共栏的数据源；公开可读，只有 admins 名单里的人能发/改/删';
+COMMENT ON COLUMN announcements.sort_order IS '排序权重，大的在前；同权重时新的在前';
+
+-- ---------------------------------------------------------------------------
+-- ⑥ RLS 闸门 —— 六张表 17 条策略（Day 21 定稿 · Day 22 增 profiles · Day 23 增 admins 与管理策略 · Day 24 增公告、撤回收站读）
 --
 -- 三条不变量（也是 api-contract.md 第五节的机器可读版）：
---   1. 五张表**全部开启行级安全**（ENABLE ROW LEVEL SECURITY）；没策略 = 拒绝，是默认态；
+--   1. 六张表**全部开启行级安全**（ENABLE ROW LEVEL SECURITY）；没策略 = 拒绝，是默认态；
 --   2. 涉权限的策略一律 TO authenticated —— 因为未登录的 auth.uid() 是 'anon' 不是 NULL，
 --      开给 anon 等于把「只读自己的」变成「读所有人的」（见 api-contract.md 第四节）；
 --   3. 所有管理策略判定式同一个：EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid())。
@@ -259,44 +280,34 @@ COMMENT ON TABLE admins IS '管理员名单：各表 *_admin_* 策略经 EXISTS 
 -- ---------------------------------------------------------------------------
 
 -- 6.1 先开闸（对已开启者重复执行是空操作）
-ALTER TABLE items    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE posts    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reports  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE admins   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE items         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE posts         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reports       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admins        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE announcements ENABLE ROW LEVEL SECURITY;
 
 -- 6.2 items：公开只读，**无任何客户端写策略**
 --     浏览量不走写策略，走 bump_item_view() 这个 SECURITY DEFINER 窄口（见 ①-b）。
 --     管理员可删条目（删榜单）；注意「不能改热度」是函数签名保证的，不是靠策略。
--- Day 22：读策略补 `NOT is_deleted` —— 软删除的真正生效点就在这一句。漏了它，
---         标记了却仍然读得到，等于「界面说删了、数据还在」，比报错更糟（没有信号）。
+--     Day 24：读策略回到干净的一句 —— 软删除撤掉后，这里不再需要 is_deleted 条件，
+--     目的只为放行整表（详情页、榜单、检索都要读它）。
 DROP POLICY IF EXISTS items_read_all ON items;
 CREATE POLICY items_read_all ON items
   FOR SELECT TO anon, authenticated
-  USING (NOT is_deleted);
+  USING (true);
 
 DROP POLICY IF EXISTS items_admin_delete ON items;
 CREATE POLICY items_admin_delete ON items
   FOR DELETE TO authenticated
   USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
 
--- Day 22 补：管理员需要**看得见已回收的条目**，否则回收站里是空的，恢复入口无处安放。
--- ⚠️ 两条读策略是 **OR** 关系，所以这条一加，管理员会话下 getItems() 也会带上已回收条目
---    → 因此所有**展示用**的读必须显式过滤 is_deleted（js/api.js 已加），不能只靠 RLS 兜。
---    这与 posts 的形态完全一致（posts_read 过滤 / posts_admin_read 不过滤）。
-DROP POLICY IF EXISTS items_admin_read ON items;
-CREATE POLICY items_admin_read ON items
-  FOR SELECT TO authenticated
-  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
-
 -- 6.3 posts：公开列表只出 approved；作者总能看见自己的（含 pending/rejected）；
 --     插入只能插成「自己的 + pending」；状态机推进只有管理员能动。
---     ⚠️ 公开读补了 `NOT is_deleted`，但**管理读（posts_admin_read）刻意不加** ——
---        要能在后台看见已回收的帖子才能把它恢复回来。两条读策略的差别就是「软删」的正确形态。
 DROP POLICY IF EXISTS posts_read ON posts;
 CREATE POLICY posts_read ON posts
   FOR SELECT TO anon, authenticated
-  USING (NOT is_deleted AND (status = 'approved' OR author_id = auth.uid()));
+  USING (status = 'approved' OR author_id = auth.uid());
 
 DROP POLICY IF EXISTS posts_insert_own ON posts;
 CREATE POLICY posts_insert_own ON posts
@@ -329,7 +340,7 @@ CREATE POLICY reports_insert ON reports
 DROP POLICY IF EXISTS reports_read_own ON reports;
 CREATE POLICY reports_read_own ON reports
   FOR SELECT TO authenticated
-  USING (NOT is_deleted AND author_id = auth.uid());
+  USING (author_id = auth.uid());
 
 DROP POLICY IF EXISTS reports_admin_read ON reports;
 CREATE POLICY reports_admin_read ON reports
@@ -364,134 +375,19 @@ CREATE POLICY admins_read_self ON admins
   FOR SELECT TO authenticated
   USING (user_id = auth.uid());
 
--- ---------------------------------------------------------------------------
--- 6.7 「删除」改成「回收」：BEFORE DELETE 触发器（Day 22 新增）
---
--- 为什么用触发器而不是改前端：**前端一行都不用动**。
---   DELETE 策略原样保留（管理员仍然"有权删除"），但语句一落地就被触发器拦下：
---     ① 把该行的 is_deleted 置 true（这一步在 SECURITY DEFINER 函数里做，越过 RLS）；
---     ② 返回 NULL → 物理删除被取消，磁盘上那行从未消失。
---   客户端收到 204（api.js 的 `.delete().eq()` 不带 `.select()`，PostgREST 不看影响行数），
---   所以界面照常显示"删除成功" —— 而真实语义已经是"回收进回收站"。
---
--- 这正是「删除比新增更容易出事」的答案落地：**把不可逆从客户端能力里整个拿掉**。
--- 现在客户端无论怎么发 DELETE，最坏结果只是把一行标记成已回收；恢复一条 UPDATE 即可。
---
--- 🔒 「真要物理删」怎么办？物理删除必须**显式关掉保险**，且只能走站方 SQL 通道：
---      ALTER TABLE posts DISABLE TRIGGER trg_posts_soft_delete;
---      DELETE FROM posts WHERE id = ...;
---      ALTER TABLE posts ENABLE  TRIGGER trg_posts_soft_delete;
---   要关保险才能真删 —— 这个"多一步"本身就是我们加的第二道确认（见 docs/day22-crud-loop.md）。
---
--- `SET search_path = public` 同样必备：SECURITY DEFINER 不锁搜索路径，会被同名对象劫持。
--- 动态 SQL 用 `format('%I', TG_TABLE_NAME)` 引号化标识符，id 值走 `USING` 绑定参数，
--- 表名与值都不参与字符串拼接 —— 触发器里没有可注入的位置。
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION soft_delete_rows()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  EXECUTE format('UPDATE %I SET is_deleted = true WHERE id = $1', TG_TABLE_NAME)
-    USING OLD.id;
-  RETURN NULL;   -- 返回 NULL = 取消这次物理删除
-END;
-$$;
+-- 6.7 announcements：公开可读（公告就是给人看的，未登录也要看得到）；
+--     写操作全部限定在 admins 名单内 —— 一条 FOR ALL 覆盖增 / 改 / 删三种动作。
+--     USING 管「对哪些行有效」，WITH CHECK 管「新写入的行合不合法」，两个都写全。
+DROP POLICY IF EXISTS announcements_read_all ON announcements;
+CREATE POLICY announcements_read_all ON announcements
+  FOR SELECT TO anon, authenticated
+  USING (true);
 
-DROP TRIGGER IF EXISTS trg_items_soft_delete   ON items;
-CREATE TRIGGER trg_items_soft_delete   BEFORE DELETE ON items   FOR EACH ROW EXECUTE FUNCTION soft_delete_rows();
-DROP TRIGGER IF EXISTS trg_posts_soft_delete   ON posts;
-CREATE TRIGGER trg_posts_soft_delete   BEFORE DELETE ON posts   FOR EACH ROW EXECUTE FUNCTION soft_delete_rows();
-DROP TRIGGER IF EXISTS trg_reports_soft_delete ON reports;
-CREATE TRIGGER trg_reports_soft_delete BEFORE DELETE ON reports FOR EACH ROW EXECUTE FUNCTION soft_delete_rows();
-
-COMMENT ON FUNCTION soft_delete_rows() IS '把 DELETE 改写成"置 is_deleted 标记"并取消物理删除（Day 22）。SECURITY DEFINER 才能越过 RLS 改写；要真删必须先 DISABLE TRIGGER';
-
--- ---------------------------------------------------------------------------
--- 6.8 「恢复」：items / reports 的窄口函数（Day 22 补）
---
--- 为什么 posts 能靠 UPDATE 策略恢复、这两张表不能：
---   posts_admin_update 这条策略放行的是**整表 UPDATE**，管理员因此能顺手改 heat 一类的字段；
---   posts 没有"某列绝对不能改"的铁律，所以可以接受。
---   items 不一样 —— **「热度不可篡改」是本项目的铁律**（热度算法是站点的性格）：
---     它现在由「items 根本没有 UPDATE 策略」来保证，硬得不能再硬。
---     一旦为了恢复而加一条 UPDATE 策略，就等于把 heat / views / verdict 一起交到管理员手上，
---     铁律立刻从"数据库不可能"降级成"靠人自觉"。
---   → 所以这里走**窄口函数**：函数体内只写 `is_deleted = false` 一列，
---     调用方无论传什么参数都够不到 heat，与 bump_item_view 的思路一脉相承
---     （能窄到那个程度，就不给它宽的可能）。
---
--- 🔒 函数里的管理员自检是**唯一防线**（SECURITY DEFINER 会绕过 RLS）→ 这段判断不能省。
---    `auth.uid()` 读的是请求里的 JWT claim（GUC），与函数的安全上下文无关，
---    所以在 SECURITY DEFINER 里依然拿得到**调用者**身份（已实测）。
---    两道门：① 函数级 EXECUTE 只给 authenticated（匿名连函数都看不见）；
---            ② 函数体内再核一次 admins 名单（普通登录用户调得进来，但会被中文错误挡掉）。
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION restore_item(p_id text)
-RETURNS items
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE v items;
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()) THEN
-    RAISE EXCEPTION '只有管理员可以恢复条目' USING ERRCODE = '42501';
-  END IF;
-
-  UPDATE items SET is_deleted = false
-   WHERE id = p_id AND is_deleted = true
-  RETURNING * INTO v;
-
-  IF v.id IS NULL THEN
-    RAISE EXCEPTION '这条条目没有处于「已回收」状态（id=%），不需要恢复', p_id USING ERRCODE = 'P0002';
-  END IF;
-
-  RETURN v;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION restore_report(p_id bigint)
-RETURNS reports
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE v reports;
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()) THEN
-    RAISE EXCEPTION '只有管理员可以恢复线索' USING ERRCODE = '42501';
-  END IF;
-
-  UPDATE reports SET is_deleted = false
-   WHERE id = p_id AND is_deleted = true
-  RETURNING * INTO v;
-
-  IF v.id IS NULL THEN
-    RAISE EXCEPTION '这条线索没有处于「已回收」状态（id=%），不需要恢复', p_id USING ERRCODE = 'P0002';
-  END IF;
-
-  RETURN v;
-END;
-$$;
-
--- 函数级门：只发给登录用户。
--- ⚠️ 平台事实（Day 22 实测）：托管库有 **DEFAULT PRIVILEGES** —— 函数一创建，
---    平台就自动把 EXECUTE 授给了 `anon` / `authenticated` / `service_role`。
---    所以**光写 `REVOKE ... FROM PUBLIC` 不够**：那只会移除 ACL 里的 `=X`（PUBLIC）项，
---    `anon=X` 是平台显式授的，依然留着，匿名照样能进函数体。
---    必须像下面这样**把 anon 一并写进 REVOKE 的名单里**，门才算真关上。
---    （实测对照：只 REVOKE PUBLIC 时，匿名调用得到的是函数体内的中文错误；
---      连 anon 一起 REVOKE 后，得到的是 `permission denied for function`。）
-REVOKE ALL ON FUNCTION restore_item(text)   FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION restore_report(bigint) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION restore_item(text)   TO authenticated;
-GRANT EXECUTE ON FUNCTION restore_report(bigint) TO authenticated;
-
-COMMENT ON FUNCTION restore_item(text) IS '恢复已回收条目（Day 22）。窄口：函数体内只改 is_deleted 一列，因此「热度不可篡改」不受影响；SECURITY DEFINER + 管理员自检';
-COMMENT ON FUNCTION restore_report(bigint) IS '恢复已回收线索（Day 22）。窄口：函数体内只改 is_deleted 一列；SECURITY DEFINER + 管理员自检';
+DROP POLICY IF EXISTS announcements_admin_write ON announcements;
+CREATE POLICY announcements_admin_write ON announcements
+  FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid()));
 
 COMMIT;
 
@@ -504,14 +400,17 @@ COMMIT;
 --   GET  /api/items/:id      → SELECT * FROM items WHERE id = $1
 --   POST /api/search         → L3：先走上面的 items 查询做站内命中，再走 AI 拆解指路
 --   POST /rpc/bump_item_view → SELECT bump_item_view($id)  —— 唯一改 items 的通道（只能 +1）
---   POST /rpc/restore_item   → SELECT restore_item($id)    —— 恢复已回收条目（窄口：只把 is_deleted 置回 false）
---   POST /rpc/restore_report → SELECT restore_report($id)  —— 恢复已回收线索（同上，仅管理员可调）
 --   GET  /api/posts          → SELECT * FROM posts WHERE status = 'approved' ORDER BY created_at DESC
 --                              （RLS 的 posts_read 完成过滤；登录者额外看得到自己的 pending）
 --   POST /api/posts          → INSERT INTO posts (category, title, body, author_name, item_id)
 --                              —— author_id / status 不许传，RLS 强制「本人 + pending」
 --   POST /api/reports        → INSERT INTO reports (text, url)，不带 RETURNING（匿名无读权限）
 --   GET  /api/reports        → SELECT * FROM reports（RLS 的 reports_read_own 只给登录者自己的行）
+--   GET  /api/announcements  → SELECT * FROM announcements WHERE is_pinned
+--                              ORDER BY sort_order DESC, id DESC  —— 公开读，未登录也给
+--   POST /api/announcements  → INSERT INTO announcements (title, body, sort_order)
+--                              —— 只有 admins 名单里的人能写（announcements_admin_write）
+--   PATCH/DELETE /api/announcements/:id → 同一条策略放行（FOR ALL）
 --
 -- 错误返回统一 { "error": { "code": "...", "message": "..." } }，前端按四态规范处理。
 -- ============================================================================

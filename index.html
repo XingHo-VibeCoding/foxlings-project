@@ -187,6 +187,28 @@
         <div class="stat-row" id="forum-stats"></div>
       </div>
 
+      <!-- 站方公告栏（Day 24）：置顶公共栏。
+           内容存在数据库里、由管理员在后台发布（admin.html → 站方公告），页面只负责显示 ——
+           所以改一句社区规则不用改代码、不用重新发版。
+           多条时自动轮播（可手动左右切、鼠标悬停暂停）；只有一条时定住不动、不出现切换控件。
+           底部那块「社区规则与审核」保持完整版：公告栏是站方口径的通知与提醒，那儿是发帖细则。 -->
+      <section class="notice-bar" id="notice-bar" aria-labelledby="notice-title" hidden>
+        <div class="notice-head">
+          <h3 class="notice-title" id="notice-title">站方公告</h3>
+          <div class="notice-nav" id="notice-nav" hidden>
+            <button type="button" class="notice-arrow" id="notice-prev" aria-label="上一条公告">‹</button>
+            <span class="notice-pos" id="notice-pos" aria-hidden="true">1 / 1</span>
+            <button type="button" class="notice-arrow" id="notice-next" aria-label="下一条公告">›</button>
+          </div>
+        </div>
+        <!-- 视窗固定、轨道横向位移：切换时不重排 DOM，也不会把页面顶得跳来跳去 -->
+        <div class="notice-viewport" id="notice-viewport">
+          <div class="notice-track" id="notice-track"></div>
+        </div>
+        <!-- 只有「用户主动切」时才播报一句；自动轮播不打扰屏幕阅读器 -->
+        <p class="notice-live" id="notice-live" aria-live="polite"></p>
+      </section>
+
       <!-- 发帖区：需登录（身份见 js/auth.js）；提交后一律先进人工审核队列 -->
       <section class="forum-compose" aria-labelledby="compose-heading">
         <h3 class="compose-title" id="compose-heading">发一条求助</h3>

@@ -1,5 +1,6 @@
 /* ============================================================
-   api.js — 数据接口层（Day 20 接读接口 · Day 21 接写接口 · Day 22 补改/删防呆）
+   api.js — 数据接口层
+     （Day 20 接读接口 · Day 21 接写接口 · Day 22 补改/删防呆 · Day 24 撤软删除、加站方公告）
 
    【它在整个作品里的位置】
      页面脚本（home.js / detail.js / search.js / mine.js / forum.js）
@@ -24,6 +25,9 @@
               且只能插「自己的 + 待审」
      reports  INSERT 允许未登录（author_id 落为 'anon'）；SELECT **只给已登录用户看自己的** ——
               匿名身份读不到任何线索，否则访客能把所有人匿名提交的线索都读走
+     announcements  公开只读（未登录也看得到，公告本来就是给人看的）；
+              增 / 改 / 删一律只认 admins 名单里的人 —— 规则文案由站方在后台维护，
+              页面只负责显示，不用为了改一句话重新发版
 
    【一个实测出来的平台事实，写策略时必须知道】
    未登录时 auth.uid() 返回的是字符串 'anon'，**不是 NULL**。踩过的两个坑：
@@ -107,97 +111,60 @@ function describeStorageError(error) {
   return "头像上传失败：" + (msg || code || "未知错误");
 }
 
+/* ---------------- 「这条不存在」的统一说法（Day 22 建 · Day 24 抽成函数） ----------------
+
+   两处都会用到它：改之前的预检（fetchRowOrThrow），以及删除后拿不到返回行时。
+   说法必须点到两种可能 —— 真被删了，或者账号没有相应权限 —— 否则用户拿着
+   「没有找到这条帖子」会一头雾水（明明在列表里还看得见）。
+
+   ⚠️ 这是**可用性防线**，不是安全闸门：真正的权限在数据库的 RLS 策略里，
+      非管理员绕过前端照样写不动（0 行或 42501）。 */
+function notFoundError(label, id) {
+  const e = new Error(
+    "没有找到这条" + label + "（id=" + id + "）—— 它可能已经被删掉了；" +
+    "如果它本该还在，请确认你的账号有没有相应权限。"
+  );
+  e.code = "NOT_FOUND";
+  return e;
+}
+
 /* ---------------- 单条记录的「存在性预检」（Day 22 防呆） ----------------
 
    课程要求：操作一个**不存在的 id** 时，接口要给出**明确的中文错误**，不能静默、不能崩。
 
-   为什么这里必须单独发一场 SELECT，而不是靠写操作自己报错：
+   为什么 PATCH 要单独发一场 SELECT，而不是靠写操作自己报错：
+   PostgREST 在不索要返回值时，不管改到几行都只回 204 —— 传个不存在的 id 也「成功」，
+   用户以为改上了，实际一行没动（静默失败最坑）。所以把「这条在不在」的判断
+   **前置到写操作之前**，一次 SELECT 说清楚；顺带拿到的整行就是「改动前的快照」，
+   可直接做前后对比（setPostStatus 正是这么用的）。
 
-     · PATCH：PostgREST 在不索要返回值时，不管改到几行都只回 204 ——
-       传个不存在的 id 也「成功」，用户以为改上了，实际一行没动（静默失败最坑）；
-     · DELETE：三张表都装了 BEFORE DELETE 触发器把物理删除改写成「置 is_deleted」，
-       触发返回 NULL 取消了这次删除 —— **被取消的行不会出现在 RETURNING 里**，
-       所以「删到没删到」根本无法从 DELETE 的返回里看出来。
-       用 `.delete().select()` 去数行数，会把「软删成功」误报成「查无此 id」。
-
-   所以：把「这条在不在」的判断**前置到写操作之前**，一次 SELECT 说清楚。
-
-   ⚠️ 定位要说清：这是**可用性防线**（把「查无此 id」翻成人话、拦住无效请求），
-      **不是安全闸门**。真正的权限仍在各表 *_admin_* RLS 策略里 ——
-      非管理员即便绕过这一层，写请求照样被数据库拒（0 行或 42501）。
-
-   返回查到的整行：它顺带就是需求里要的「操作前的快照」，可直接拿来做前后对比。 */
+   删除不走这条路：DELETE 能直接带 `.select()`，把「删掉的那一行」要回来，
+   一次请求同时完成「删掉」与「确认删到了」（见 deletePost）。 */
 async function fetchRowOrThrow(table, id, label) {
   const rows = unwrap(
     await getCloudClient().database.from(table).select("*").eq("id", id).limit(1),
     label + "预检"
   );
   const row = Array.isArray(rows) ? rows[0] : null;
-  if (!row) {
-    const e = new Error(
-      "没有找到这条" + label + "（id=" + id + "）—— 它可能已经被删掉了；" +
-      "如果它本该还在，请确认你的账号有没有相应权限。"
-    );
-    e.code = "NOT_FOUND";
-    throw e;
-  }
+  if (!row) throw notFoundError(label, id);
   return row;
-}
-
-/* ---------------- 恢复通道（Day 22）：RPC 窄口函数 ----------------
-
-   为什么不复用 UPDATE 策略：见 api.restoreItem 的注释（items 的「不能改热度」靠
-   「没有 UPDATE 策略」保证，加策略等于把 heat 一起交出去）。
-
-   这里只做两件事：把「参数都没给」这种低级错误提前拦住；把数据库的报错翻成人话。
-   后端主动抛的中文说明（「只有管理员可以恢复条目」/「没有处于已回收状态」）已经够清楚，
-   直接透传给用户，不再包装一层 —— 多说一层反而把原因说糊了。 */
-async function callRestoreRpc(fnName, args, label) {
-  const id = args && args.p_id;
-  if (id === undefined || id === null || id === "") {
-    const e = new Error("缺少" + label + " id，没法恢复。");
-    e.code = "BAD_ARG";
-    throw e;
-  }
-
-  const res = await getCloudClient().database.rpc(fnName, args);
-  if (res && res.error) {
-    const e = new Error(describeRestoreError(res.error, label));
-    e.code = res.error.code;
-    throw e;
-  }
-  // 函数返回「恢复后的那一行」（RETURNS items / reports）
-  console.log("[api] 已恢复" + label + " " + id + "：is_deleted true → false（公网 GET 会重新返回它）");
-  return res && res.data;
-}
-
-/** 恢复失败 → 人话。注意网关会给数据库错误码加 DATABASE_ 前缀（Day 22 实测） */
-function describeRestoreError(error, label) {
-  const code = String((error && error.code) || "").replace(/^DATABASE_/, "");
-  const msg = String((error && error.message) || "");
-  // 匿名调 RPC 时到这里：函数的 EXECUTE 权限只给了 authenticated
-  if (/permission denied for function/i.test(msg)) return "恢复需要先登录，而且账号要有管理权限。";
-  // 42501 / P0002 都是函数体内主动抛的中文说明（权限不足 / 不在回收站里），直接给用户看
-  if (code === "42501" || code === "P0002") return msg;
-  return "恢复" + label + "失败：" + (msg || code || "未知错误");
 }
 
 const api = {
   /* ---------------- 核查条目（读） ---------------- */
 
   /**
-   * 读接口：取全部核查条目（**展示口径**：不含已回收的）。
+   * 读接口：取全部核查条目。
    * 返回条目数组（字段与 data/data.json 完全一致，不做改名/映射 —— 见 api-contract.md）。
    * 出错时抛出，由页面按四态规范渲染错误态。
    *
-   * ⚠️ 这里的 `.eq("is_deleted", false)` 不是多余的：items 有**两条 SELECT 策略**
-   *    （items_read_all 给所有人、items_admin_read 给管理员），策略之间是 **OR** ——
-   *    管理员会话下光靠 RLS 会把已回收的条目一起带出来。展示口径必须显式写死，
-   *    不能指望「策略恰好挡住」。（Day 22 加 items_admin_read 时才暴露出来的连带影响。）
+   * Day 24 撤掉软删除后，这里回到了最朴素的形态：items 只剩一条公开读策略
+   * （items_read_all，USING true），读到的就是全部、也是唯一的那一份 ——
+   * 不再需要「展示口径 / 管理口径」两套读法去分辨已被回收的行。
    */
   async getItems() {
     const data = unwrap(
-      await getCloudClient().database.from("items").select("*").eq("is_deleted", false),
+      await getCloudClient().database.from("items").select("*"),
       "条目读取"
     );
     return Array.isArray(data) ? data : [];
@@ -216,7 +183,6 @@ const api = {
       await getCloudClient().database
         .from("posts")
         .select("*")
-        .eq("is_deleted", false)   // 展示口径：和 getItems 同理 —— posts_admin_read 是 OR 上的另一条策略
         .order("created_at", { ascending: false })
         .order("id", { ascending: false }),
       "帖子读取"
@@ -467,41 +433,6 @@ const api = {
   },
 
   /**
-   * 管理读：取全部核查条目，**含已回收的**（后台的回收站视图）。
-   * 由 items_admin_read 策略放行（只有 admins 表里的人拿得到）；普通访客拿到的是空。
-   * 与 getItems() 的差别就是「要不要 is_deleted 那一句」—— 这正是软删除的正确形态：
-   * **公开读过滤、管理读不过滤**，后台才看得见可恢复的东西。
-   */
-  async listAllItems() {
-    const data = unwrap(
-      await getCloudClient().database.from("items")
-        .select("*").order("updated_at", { ascending: false }),
-      "条目读取（管理）"
-    );
-    return Array.isArray(data) ? data : [];
-  },
-
-  /**
-   * 恢复已回收条目 / 线索（Day 22）。
-   *
-   * 走的是 **RPC 窄口函数**（restore_item / restore_report），不是 UPDATE 策略 ——
-   * 原因是 items 的「热度不可篡改」这条铁律，靠的是「items 根本没有 UPDATE 策略」。
-   * 若为了恢复去加一条 UPDATE 策略，heat / views / verdict 就一并交到管理员手上了，
-   * 铁律立刻从「数据库不可能」降级成「靠人自觉」。窄口函数里只写 `is_deleted = false` 一列，
-   * 调用方无论传什么参数都够不到 heat。
-   *
-   * 安全不在这一层：函数级 EXECUTE 只给 authenticated（匿名连函数体都进不去），
-   * 函数体内再核一次 admins 名单 —— 两道门都在数据库里。
-   */
-  async restoreItem(id) {
-    return callRestoreRpc("restore_item", { p_id: id }, "条目");
-  },
-
-  async restoreReport(id) {
-    return callRestoreRpc("restore_report", { p_id: id }, "线索");
-  },
-
-  /**
    * 审核（PATCH）：status 只认 approved / rejected / pending（pending 用于「撤回下架」）。
    *
    * Day 22 补「防呆」三步，缺一不可：
@@ -538,57 +469,25 @@ const api = {
   },
 
   /**
-   * 删帖（DELETE → 软删除）。Day 22 补防呆：删之前先确认这条在，
-   * 不在就抛中文错，而不是默默回 204 让人以为删掉了。
+   * 删帖（DELETE）。**真删** —— Day 24 起没有回收站，删掉的行不会留在库里。
    *
-   * 为什么存在性判断必须前置、不能用 `.delete().select()` 数行数：
-   * 触发器把物理删除取消了，被取消的行**不会出现在 RETURNING 里** ——
-   * 数行数会把「软删成功」误报成「查无此 id」。详见 fetchRowOrThrow 的注释。
-   * 返回被回收的那一行（删除前的快照）。
+   * 为什么带 `.select()`：PostgREST 的 DELETE 不带它时，删 0 行与删 1 行都只回 204，
+   * 「查无此 id」被静默吞掉、用户以为删了。带上它，返回的就是「删掉的那一行」；
+   * 拿不到行就抛中文错（id 不存在，或账号没有权限 —— 两种可能都要点到）。
+   *
+   * ⚠️ 不可逆。调用方**必须先做两击确认**（js/admin.js 的 armDangerous）：
+   *    确认只留在这一个地方，因为这是这道操作唯一的刹车。
+   * 返回被删掉的那一行（删除前的快照，供调用方写提示文案）。
    */
   async deletePost(id) {
-    const row = await fetchRowOrThrow("posts", id, "帖子");
-    unwrap(
-      await getCloudClient().database.from("posts").delete().eq("id", id),
+    const data = unwrap(
+      await getCloudClient().database.from("posts").delete().eq("id", id).select(),
       "帖子删除"
     );
-    console.log("[api] 已回收帖子 " + id + "（软删除：is_deleted=true，公网 GET 立即不再返回）");
-    return row;
-  },
-
-  /**
-   * 恢复（PATCH）：把已回收的帖子置回 `is_deleted = false` —— 软删除的另一半。
-   *
-   * 走的还是 `posts_admin_update` 那条策略（admin 可 UPDATE），
-   * 所以**不需要新增任何数据库策略**：恢复能力一直都在（后端早就有了），
-   * 缺的只是界面入口 —— 这也是"不做物理删除"真正的收益：删错了不用找站方跑 SQL。
-   *
-   * ⚠️ 这里的 `.select()` 是必须的：UPDATE 不带 select 时 PostgREST 改 0 行也回 204，
-   *    那样「策略把这次改动滤掉了」会被误报成"恢复成功"。带上 select，拿不到行就抛错。
-   * 返回恢复后的行。
-   */
-  async restorePost(id) {
-    const before = await fetchRowOrThrow("posts", id, "帖子");
-    if (before.is_deleted !== true) {
-      throw new Error("这条帖子没有被回收，不需要恢复。");
-    }
-
-    const data = unwrap(
-      await getCloudClient().database.from("posts")
-        .update({ is_deleted: false, updated_at: new Date().toISOString() })
-        .eq("id", id).select(),
-      "帖子恢复"
-    );
-    const after = Array.isArray(data) ? data[0] : data;
-    if (!after) {
-      const e = new Error(
-        "没有恢复这条帖子（id=" + id + "）—— 数据库把这次改动拒了，多半是账号没有管理权限。"
-      );
-      e.code = "FORBIDDEN";
-      throw e;
-    }
-    console.log("[api] 恢复帖子 " + id + "：is_deleted true → false（公网 GET 会重新返回它）");
-    return after;
+    const gone = Array.isArray(data) ? data[0] : data;
+    if (!gone) throw notFoundError("帖子", id);
+    console.log("[api] 已删除帖子 " + id + "（物理删除，不可恢复）");
+    return gone;
   },
 
   /** 管理员读全部线索（普通登录用户只能回读自己的，RLS 定的） */
@@ -601,25 +500,121 @@ const api = {
     return Array.isArray(data) ? data : [];
   },
 
-  /** 删线索（软删除）。Day 22 防呆：先确认这条在，不在即抛中文错。返回删除前的行。 */
+  /** 删线索（真删，不可逆）。同 deletePost：带 `.select()` 确认真的删到了。 */
   async deleteReport(id) {
-    const row = await fetchRowOrThrow("reports", id, "线索");
-    unwrap(
-      await getCloudClient().database.from("reports").delete().eq("id", id),
+    const data = unwrap(
+      await getCloudClient().database.from("reports").delete().eq("id", id).select(),
       "线索删除"
     );
-    console.log("[api] 已回收线索 " + id + "（软删除）");
-    return row;
+    const gone = Array.isArray(data) ? data[0] : data;
+    if (!gone) throw notFoundError("线索", id);
+    console.log("[api] 已删除线索 " + id + "（物理删除，不可恢复）");
+    return gone;
   },
 
-  /** 榜单条目删除（软删除；删错可从 data/data.json 重新灌回，数据有种子兜底） */
+  /**
+   * 榜单条目删除（真删，不可逆）。
+   * 条目是本项目唯一留有「种子底稿」的表（data/data.json），删错了可以重灌回来 ——
+   * 但重灌的前提是站方手上还留着那份底稿，不是数据库替谁存着。别把这两件事混为一谈。
+   */
   async deleteItem(id) {
-    const row = await fetchRowOrThrow("items", id, "条目");
-    unwrap(
-      await getCloudClient().database.from("items").delete().eq("id", id),
+    const data = unwrap(
+      await getCloudClient().database.from("items").delete().eq("id", id).select(),
       "条目删除"
     );
-    console.log("[api] 已回收条目 " + id + "（软删除）");
-    return row;
+    const gone = Array.isArray(data) ? data[0] : data;
+    if (!gone) throw notFoundError("条目", id);
+    console.log("[api] 已删除条目 " + id + "（物理删除，不可恢复）");
+    return gone;
+  },
+
+  /* ---------------- 站方公告（读 + 管理写 · Day 24） ----------------
+
+     公告 = 论坛顶部的「置顶公共栏」。读是公开的（未登录也看得到），
+     写只在数据库的 announcements_admin_write 策略里放行 ——
+     下面这几个写方法对普通用户来说只是入口，调了也会被 RLS 拒。
+
+     两套读法的分工（和 Day 22 给 items 写的一模一样，只是这次是对的）：
+       · listAnnouncements()    → 展示用，只出**已公布**的（is_pinned = true）
+       · listAllAnnouncements() → 后台用，含「先写好、暂不公布」的稿子
+     数据库那边公开读策略写的是 USING (is_pinned)，管理策略是 FOR ALL 且不过滤 ——
+     两条策略是 OR 关系，所以管理员会话下单靠 RLS 会把稿子也带出来，
+     展示口径**必须在前端显式再过滤一次**。 */
+  async listAnnouncements() {
+    const data = unwrap(
+      await getCloudClient().database.from("announcements")
+        .select("*")
+        .eq("is_pinned", true)
+        .order("sort_order", { ascending: false })
+        .order("id", { ascending: false }),
+      "公告读取"
+    );
+    return Array.isArray(data) ? data : [];
+  },
+
+  /** 管理读：后台要看得见还没公布的稿子，所以不过滤 is_pinned */
+  async listAllAnnouncements() {
+    const data = unwrap(
+      await getCloudClient().database.from("announcements")
+        .select("*")
+        .order("sort_order", { ascending: false })
+        .order("id", { ascending: false }),
+      "公告读取（管理）"
+    );
+    return Array.isArray(data) ? data : [];
+  },
+
+  /** 发布一条公告。author_id 由服务端 auth.uid() 填，客户端不传 */
+  async createAnnouncement({ title, body, sortOrder, isPinned }) {
+    const row = {
+      title: title,
+      body: body,
+      sort_order: Number(sortOrder) || 0,
+      is_pinned: isPinned !== false,
+      updated_at: new Date().toISOString(),
+    };
+    const data = unwrap(
+      await getCloudClient().database.from("announcements").insert(row).select(),
+      "公告发布"
+    );
+    const saved = Array.isArray(data) ? data[0] : data;
+    if (!saved) {
+      const e = new Error("公告没有保存上 —— 数据库把这次写入拒了，多半是账号没有管理权限。");
+      e.code = "FORBIDDEN";
+      throw e;
+    }
+    return saved;
+  },
+
+  /** 改一条公告（标题 / 正文 / 排序 / 是否公布）。带 `.select()` 拿回改后的行，查无此 id 即抛错 */
+  async updateAnnouncement(id, { title, body, sortOrder, isPinned }) {
+    if (!id) throw new Error("缺少公告 id，没法修改。");
+
+    const patch = { updated_at: new Date().toISOString() };
+    if (title !== undefined) patch.title = title;
+    if (body !== undefined) patch.body = body;
+    if (sortOrder !== undefined) patch.sort_order = Number(sortOrder) || 0;
+    if (isPinned !== undefined) patch.is_pinned = !!isPinned;
+
+    const data = unwrap(
+      await getCloudClient().database.from("announcements")
+        .update(patch).eq("id", id).select(),
+      "公告修改"
+    );
+    const after = Array.isArray(data) ? data[0] : data;
+    if (!after) throw notFoundError("公告", id);
+    return after;
+  },
+
+  /** 删一条公告（真删，不可逆）。 */
+  async deleteAnnouncement(id) {
+    const data = unwrap(
+      await getCloudClient().database.from("announcements").delete().eq("id", id).select(),
+      "公告删除"
+    );
+    const gone = Array.isArray(data) ? data[0] : data;
+    if (!gone) throw notFoundError("公告", id);
+    console.log("[api] 已删除公告 " + id + "（物理删除，不可恢复）");
+    return gone;
   },
 };

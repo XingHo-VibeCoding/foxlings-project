@@ -39,33 +39,73 @@
     </section>
 
     <div id="admin-body" hidden>
+      <!-- 操作回执：删除这类不可逆动作做完后，在这里明说一句（Day 24） -->
+      <p class="admin-flash" id="admin-flash" role="status" hidden></p>
+
       <!-- ① 待审帖子：通过 / 拒绝（拒绝可填理由，会展示给作者） -->
       <section class="mine-card">
         <h2>待审帖子 <span class="mine-count" id="pend-count"></span></h2>
-        <p class="mine-about">通过 = 进公开列表；拒绝 = 作者还能在自己那边看到被拒原因。两边都不做删除，删是另一档操作。</p>
+        <p class="mine-about">通过 = 进公开列表；拒绝 = 作者还能在自己那边看到被拒原因。这里不做删除，删是下面「全部帖子」里的事。</p>
         <div id="pend-list" class="admin-list"></div>
       </section>
 
-      <!-- ② 全部帖子：已通过可下架（回待审）/ 删除；已拒绝可放回待审 -->
+      <!-- ② 全部帖子：已通过可下架（回待审）/ 删除；已拒绝可放回待审。
+           注意删除是**真删**（Day 24 起没有回收站），所以按钮点两下才生效 -->
       <section class="mine-card">
         <h2>全部帖子 <span class="mine-count" id="posts-count"></span></h2>
+        <p class="mine-about">删除是<b>不可恢复</b>的：点一次变成「确认删除？」，再点一次才真的删掉。</p>
         <input type="search" id="post-search" class="filter-search"
                placeholder="按标题 / 发起人筛选…" aria-label="筛选帖子">
         <div id="all-posts-list" class="admin-list"></div>
       </section>
 
-      <!-- ③ 榜单条目：删除（删错可从种子重灌，data/data.json 是底稿） -->
+      <!-- ③ 榜单条目：删除。真删不可恢复，底稿 data/data.json 只是站方手上的备份，不是数据库里留的副本 -->
       <section class="mine-card">
         <h2>辟谣榜条目 <span class="mine-count" id="items-count"></span></h2>
+        <p class="mine-about">删除是<b>不可恢复</b>的。真要找回，只能由站方拿 data/data.json 的底稿重新灌一次。</p>
         <input type="search" id="item-search" class="filter-search"
                placeholder="按标题筛选…" aria-label="筛选榜单条目">
         <div id="items-list" class="admin-list"></div>
       </section>
 
-      <!-- ④ 线索收件箱：普通用户只能看自己的，这里能看全部；核查完可清 -->
+      <!-- ④ 线索收件箱：普通用户只能看自己的，这里能看全部；核查完可删 -->
       <section class="mine-card">
         <h2>线索收件箱 <span class="mine-count" id="reports-count"></span></h2>
         <div id="reports-list" class="admin-list"></div>
+      </section>
+
+      <!-- ⑤ 站方公告（Day 24）：论坛顶部公告栏的数据源。社区规则也写在这里，
+           改一次全站生效，不用改代码、不用重新发版 -->
+      <section class="mine-card">
+        <h2>站方公告 <span class="mine-count" id="ann-count"></span></h2>
+        <p class="mine-about">
+          这里发布的内容会出现在<b>论坛页顶部的公告栏</b>里（多条时自动轮播，一条时定住不动）。
+          社区规则就写在这里——改一次全站生效。权重大的排在前面，拿不准就填同一档。
+        </p>
+
+        <form id="ann-form" class="ann-form">
+          <label class="compose-label" for="ann-title">标题</label>
+          <input type="text" id="ann-title" class="compose-input" maxlength="60"
+                 placeholder="如「社区规则：发帖前先看这四条」（2–60 字）">
+
+          <label class="compose-label" for="ann-body">正文</label>
+          <textarea id="ann-body" class="rep-input" rows="5" maxlength="2000"
+                    placeholder="换行会原样显示，正适合分条写规则。"></textarea>
+
+          <div class="ann-form-row">
+            <label class="ann-check">
+              <input type="checkbox" id="ann-pinned" checked> 立即公布（不勾 = 先存稿，前台看不到）
+            </label>
+            <label class="ann-order">
+              排序权重 <input type="number" id="ann-order" class="ann-order-input" value="0" step="10">
+            </label>
+            <button type="submit" class="empty-jump" id="ann-submit">发布公告</button>
+            <button type="button" class="admin-btn-ghost" id="ann-cancel" hidden>取消编辑</button>
+          </div>
+        </form>
+        <p class="compose-note" id="ann-note" role="status"></p>
+
+        <div id="ann-list" class="admin-list"></div>
       </section>
     </div>
   </main>

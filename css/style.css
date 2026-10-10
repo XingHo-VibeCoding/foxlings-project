@@ -237,7 +237,7 @@ body {
 /* 已回收（Day 22）：后台列表里「已被软删除」的行用这个徽标。
    刻意复用「存疑」那对已实测达标的颜色（浅底深字），不引入新色值 ——
    新增颜色意味着要重新验一遍对比度，而这里没有非新色不可的理由。 */
-.tag-recycled { background: var(--c-doubt-soft); color: var(--c-doubt-deep); }
+.tag-draft { background: var(--c-chip-bg); color: var(--c-chip-text); }
 
 /* 热度角标（装饰 D5）：沿用「部分属实」的暖色对，保证 4.5:1 达标 */
 .heat-badge {
@@ -797,3 +797,93 @@ button.pf-preset.active { border-color: var(--c-primary); }
 /* 帖子底部：头像与「发起人」并排一行 */
 .post-meta { display: flex; align-items: center; gap: 8px; }
 .post-meta-name { min-width: 0; }
+
+/* ============================================
+   Day 24 · 论坛站方公告栏（置顶公共栏）
+     · 多条时横向轮播、只有一条时定住不动（控件由脚本决定显不显示）；
+     · 切换 = 轨道整体位移，DOM 不重排 —— 公告长短不一时，视窗高度由脚本按当前那条同步，
+       短公告下面不留一大块空白；
+     · 色值一律走 :root 变量（C4 硬门槛），字号走 C7 阶梯，箭头按钮 44×44（B5 / M3）。
+   ============================================ */
+.notice-bar {
+  position: relative;
+  border: 1px solid var(--c-line);
+  border-left: 4px solid var(--c-primary);
+  border-radius: var(--radius);
+  background: var(--c-card);
+  box-shadow: var(--shadow);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.notice-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+
+.notice-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 700; color: var(--c-primary-dark);
+}
+.notice-title::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--c-primary); flex: 0 0 auto;
+}
+
+.notice-nav { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+
+/* 44×44 命中区（M3）：视觉上只有一个小箭头，但点得中 */
+.notice-arrow {
+  width: 44px; min-height: 44px; padding: 0;
+  border: 1px solid transparent; border-radius: 20px;
+  background: transparent; color: var(--c-muted);
+  font-size: 18px; line-height: 1; cursor: pointer;
+  transition: background .2s, color .2s, border-color .2s;
+}
+.notice-arrow:hover { background: var(--c-hover-bg); color: var(--c-primary); border-color: var(--c-chip-border); }
+.notice-pos { font-size: 12px; color: var(--c-muted); min-width: 40px; text-align: center; }
+
+.notice-viewport { overflow: hidden; transition: height .32s ease; }
+.notice-track { display: flex; transition: transform .45s ease; }
+
+.notice-item { flex: 0 0 100%; width: 100%; min-width: 0; }
+.notice-item-title { font-size: 14px; font-weight: 700; color: var(--c-text); margin-bottom: 4px; }
+/* pre-line：公告正文里的换行原样显示（规则就是一条一行写的） */
+.notice-item-body { font-size: 13px; color: var(--c-summary); white-space: pre-line; }
+
+/* 屏幕阅读器专用：视觉上藏起来但能被读出来（公告切换时播一句） */
+.notice-live {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* 用户要求减少动效时，轮播的位移与高度过渡一律免掉（内容照样能切） */
+@media (prefers-reduced-motion: reduce) {
+  .notice-track, .notice-viewport { transition: none; }
+}
+
+/* ============================================
+   Day 24 · 管理后台新增：操作回执 + 公告表单
+   ============================================ */
+
+/* 不可逆动作做完后明说一句（删除到底成功没有，Day 22 的真实反馈） */
+.admin-flash {
+  font-size: 13px; padding: 10px 14px; border-radius: 10px; margin-bottom: 12px;
+  border: 1px solid var(--c-line); background: var(--c-card); color: var(--c-text);
+}
+.admin-flash.note-ok { border-color: var(--c-true-soft); background: var(--c-true-soft); color: var(--c-true-deep); }
+.admin-flash.note-warn { border-color: var(--c-fake-soft); background: var(--c-fake-soft); color: var(--c-fake-deep); }
+
+/* 正在编辑的那一行给个低调的提示（不靠颜色单独表意，行内文案也会写「正在编辑」） */
+.admin-row-editing { border-color: var(--c-primary); background: var(--c-hover-bg); }
+
+.ann-form { border-top: 1px solid var(--c-line-soft); padding-top: 12px; margin-bottom: 12px; }
+.ann-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
+.ann-check {
+  display: flex; align-items: center; gap: 8px; min-height: 44px;
+  font-size: 13px; color: var(--c-text); cursor: pointer;
+}
+.ann-check input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; }
+.ann-order { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--c-text); }
+.ann-order-input {
+  width: 84px; min-height: 44px; padding: 0 10px;
+  border: 1px solid var(--c-input-border); border-radius: 10px;
+  background: var(--c-white); color: var(--c-text); font-size: 13px;
+}

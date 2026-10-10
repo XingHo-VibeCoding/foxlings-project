@@ -718,6 +718,42 @@ O['次要文字对比度_对卡片'] = r2(cr(varMap['--c-muted'], varMap['--c-ca
     return small === 0;
   })();
 
+  /* ---- Day 24：站方公告栏（发布在后台，展示在论坛顶部） ----
+     公告条数是**活数据**（站方随时增删），所以这里一律不写死「应该有 N 条」——
+     拿「页面渲染出来的」对「接口层当场读到的」做同源交叉验证
+     （Day 23 的教训：活数据当死基准，用户一发帖就误报）。 */
+  const noticesFromApi = await page.evaluate(async () => {
+    try { return (await api.listAnnouncements()).map((a) => String(a.title || '')); }
+    catch (e) { return null; }
+  });
+
+  // F13：公告栏与云端一致 —— 有公告就显示且逐条对得上；一条都没有时整块收起（不留空框）
+  R['F13_公告栏与云端一致'] = await page.evaluate((titles) => {
+    const bar = document.getElementById('notice-bar');
+    if (!bar) return false;
+    if (!titles || !titles.length) return bar.hidden === true;
+    if (bar.hidden) return false;
+    const cards = [...bar.querySelectorAll('.notice-item')];
+    if (cards.length !== titles.length) return false;
+    return titles.every((t, i) => (cards[i].textContent || '').indexOf(t) !== -1);
+  }, noticesFromApi);
+  O['F13_公告条数'] = noticesFromApi === null ? '接口读取失败' : (noticesFromApi.length + ' 条');
+
+  // F14：多条时真的能手动切 —— 断的不只是文字变了，而是**轨道真的位移了一屏**
+  //      （只查 textContent 会漏掉「文字换了但视觉没动」这种坏法，Day 21 的 hover 教训）
+  R['F14_公告可手动切换'] = await (async () => {
+    if (!noticesFromApi || noticesFromApi.length < 2) return true;   // 只有一条：没得切，跳过
+    if (!(await page.locator('#notice-nav').isVisible())) return false;
+    const t0 = await page.locator('#notice-track').boundingBox();
+    const pos0 = (await page.locator('#notice-pos').textContent()).trim();
+    await page.locator('#notice-next').click();
+    await page.waitForTimeout(700);
+    const t1 = await page.locator('#notice-track').boundingBox();
+    const pos1 = (await page.locator('#notice-pos').textContent()).trim();
+    const shifted = !!(t0 && t1) && Math.abs(t1.x - t0.x) > 50;
+    return pos0 !== pos1 && shifted;
+  })();
+
   /* ---- A 组：架构分层（Day 21 板块三收口） ----
      「分层」在本项目的含义：页面只认 api.xxx() 与 auth.xxx()，
      谁直接摸 SDK / 数据库 / 本地 json，谁就是在给下一次换数据源埋雷。

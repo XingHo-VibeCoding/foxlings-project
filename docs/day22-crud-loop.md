@@ -3,6 +3,11 @@
 > 日期：2026-10-10｜项目：热门时事真伪辨别网站（foxlings-project）
 > 站点：https://rumor-check-12000.app.workbuddy.host/
 > 关联：`db/schema.sql`（本日修订）· `docs/day21-acceptance.md`（昨日验收）· `api-contract.md`
+>
+> ⚠️ **Day 24 已撤回本日的软删除设计**：站方决定「没必要留数据，堆着也没用」，
+> 删除回到**真删**（`is_deleted` 列、软删触发器、`restore_*` 函数、回收站读策略全部撤除）。
+> 本文记录的是 Day 22 当时的形态，**保留作为决策演进的过程**；
+> 现状以 `docs/day24-notice-and-real-delete.md` 与 `api-contract.md` 第七节为准。
 
 ---
 

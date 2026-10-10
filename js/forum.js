@@ -2,6 +2,7 @@
    forum.js — 论坛（F3）
      Day 19 建界面骨架（读本地样例帖 + 发帖暂存本机）
      Day 21 接后端：帖子读云库、发帖写云库（一律先进人工审核队列）
+     Day 24 加站方公告栏：内容存云库（announcements 表），管理员在后台发布，多条自动轮播
 
    论坛在本站的位置：工具查不到的消息，交给人来找线索。
    已删的短视频、私密群聊里的截图，恰恰是自动化工具够不着、最需要人工补位的地方。
@@ -406,6 +407,10 @@ async function initForumData() {
   POST_STATE = "loading";
   renderForumView();
 
+  // 公告与帖子并行取，但**不等它**：公告是附属信息，读到就画，读不到整块收起来，
+  // 绝不因为它把帖子列表拖成错误态（loadNotices 自己兜底，不会抛）。
+  loadNotices();
+
   try {
     // 帖子与资料一起等：头像要等资料（含签名 URL）就绪再画，
     // 否则会先渲染一批色块、再整屏重画一次，闪得很难看
@@ -433,9 +438,152 @@ async function refreshPosts() {
   renderCompose();
 }
 
+/* ---------------- 站方公告栏（Day 24） ----------------
+
+   内容来自云库 announcements 表，由管理员在后台发布 —— 前端只负责显示与轮播，
+   一个字都不判断内容。改一句社区规则不用改代码、不用重新发版。
+
+   轮播的三条分寸：
+     · **只有一条时不转**，也不显示切换控件（没得切，控件只会碍眼）；
+     · 多条时自动转，但鼠标停进去 / 键盘焦点落进来就暂停 —— 正在读的那条不该被抢走；
+     · 用户自己切过之后重新计时（刚点完立刻又被自动跳走，是最烦人的那种）。
+   还有一条是给屏幕阅读器的：自动轮播**不播报**（每隔几秒打断一次根本没法用），
+   只有用户主动切换时，才往 #notice-live 里写一句。
+
+   为什么这里不怕「公告条数是活的」：渲染的就是「当时读到几条就几条」，
+   没有任何写死的基准 —— 后台加一条，刷新页面就多一条。 */
+
+const NOTICE_INTERVAL_MS = 6000;   // 自动轮播间隔：读得完一条的时间，不给太快
+
+let NOTICES = [];
+let noticeIndex = 0;
+let noticeTimer = null;
+
+/** 一条公告 → 一张牌 */
+function renderNoticeItem(a, i) {
+  const el = document.createElement("article");
+  el.className = "notice-item";
+  el.setAttribute("role", "group");
+  el.setAttribute("aria-roledescription", "公告");
+  el.setAttribute("aria-label", (i + 1) + " / " + NOTICES.length + "：" + (a.title || "站方公告"));
+  el.innerHTML =
+    '<h4 class="notice-item-title">' + escHtml(a.title || "") + "</h4>" +
+    '<p class="notice-item-body">' + escHtml(a.body || "") + "</p>";
+  return el;
+}
+
+/** 视窗高度跟着当前那条走：公告长短不一时，下面不留一大块空白 */
+function syncNoticeHeight() {
+  const vp = document.getElementById("notice-viewport");
+  const track = document.getElementById("notice-track");
+  if (!vp || !track || !track.children[noticeIndex]) return;
+  vp.style.height = track.children[noticeIndex].offsetHeight + "px";
+}
+
+/** 把轨道移到第 index 条（越界自动环绕）。announce = true 时才播报给屏幕阅读器 */
+function showNotice(index, announce) {
+  const track = document.getElementById("notice-track");
+  if (!track || !NOTICES.length) return;
+
+  noticeIndex = (index + NOTICES.length) % NOTICES.length;
+  track.style.transform = "translateX(-" + (noticeIndex * 100) + "%)";
+
+  const pos = document.getElementById("notice-pos");
+  if (pos) pos.textContent = (noticeIndex + 1) + " / " + NOTICES.length;
+
+  syncNoticeHeight();
+
+  if (announce) {
+    const live = document.getElementById("notice-live");
+    const cur = NOTICES[noticeIndex];
+    if (live && cur) {
+      live.textContent = "第 " + (noticeIndex + 1) + " 条，共 " + NOTICES.length + " 条：" + (cur.title || "");
+    }
+  }
+}
+
+function stepNotice(dir, byUser) {
+  showNotice(noticeIndex + dir, byUser);
+  if (byUser) restartNoticeTimer();   // 用户刚切过：重新计时，别马上又被自动跳走
+}
+
+function stopNoticeTimer() {
+  if (noticeTimer) { clearInterval(noticeTimer); noticeTimer = null; }
+}
+
+function restartNoticeTimer() {
+  stopNoticeTimer();
+  if (NOTICES.length < 2) return;   // 只有一条：定住不动
+  // 用户系统里开了「减少动效」就不自动转 —— 手动切换照样能用
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  noticeTimer = setInterval(() => stepNotice(1, false), NOTICE_INTERVAL_MS);
+}
+
+function renderNotices() {
+  const bar = document.getElementById("notice-bar");
+  const track = document.getElementById("notice-track");
+  const nav = document.getElementById("notice-nav");
+  if (!bar || !track) return;
+
+  // 一条公告都没有：整块收起来，不留一个空框在那儿
+  if (!NOTICES.length) {
+    bar.hidden = true;
+    stopNoticeTimer();
+    return;
+  }
+
+  bar.hidden = false;
+  track.innerHTML = "";
+  NOTICES.forEach((a, i) => track.appendChild(renderNoticeItem(a, i)));
+
+  // 切换控件「有的切」时才出现
+  if (nav) nav.hidden = NOTICES.length < 2;
+
+  noticeIndex = 0;
+  showNotice(0, false);
+  restartNoticeTimer();
+}
+
+/** 读公告并渲染。失败只记一笔、把整块收起来 —— 公告读不到不该让论坛整页变错误态 */
+async function loadNotices() {
+  try {
+    NOTICES = await api.listAnnouncements();
+  } catch (err) {
+    console.error("[forum] 公告读取失败（整块收起，不影响帖子）：", err);
+    NOTICES = [];
+  }
+  renderNotices();
+}
+
+function initNoticeUI() {
+  const prev = document.getElementById("notice-prev");
+  const next = document.getElementById("notice-next");
+  if (prev) prev.addEventListener("click", () => stepNotice(-1, true));
+  if (next) next.addEventListener("click", () => stepNotice(1, true));
+
+  const bar = document.getElementById("notice-bar");
+  if (bar) {
+    // 鼠标停进来 / 键盘焦点落进来 = 正在读，暂停；离开再接着转
+    bar.addEventListener("mouseenter", stopNoticeTimer);
+    bar.addEventListener("mouseleave", restartNoticeTimer);
+    bar.addEventListener("focusin", stopNoticeTimer);
+    bar.addEventListener("focusout", restartNoticeTimer);
+  }
+
+  // 切到别的标签页时不必偷偷转，回来接着转
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopNoticeTimer();
+    else restartNoticeTimer();
+  });
+
+  // 换行 / 缩放会让每条公告的高度变，视窗高度得跟着重算
+  window.addEventListener("resize", syncNoticeHeight);
+}
+
 /* 注册进首页的视图渲染表（home.js 定义）：切视图 / 核查数据就绪时统一重绘
    —— 帖子里的「相关核查」链接要等 items 就绪才能补上，这条注册是它的保障。 */
 VIEW_RENDERERS.push(renderForumView);
 
+initNoticeUI();
 initForumUI();
 initForumData();
