@@ -123,9 +123,11 @@ function avatarHtml(uid, name, cls) {
   const extra = cls || "";
 
   // ① 传过图且签名成功 → 用真图
+  //    data-avatar-path 是给「续签」用的：图片加载失败时靠它反查路径、重新签名
   if (row && row.avatar_kind === "upload" && row.avatar_value && __avUrls[row.avatar_value]) {
     return '<span class="fx-avatar ' + extra + '">' +
-      '<img src="' + escHtml(__avUrls[row.avatar_value]) + '" alt="">' +
+      '<img src="' + escHtml(__avUrls[row.avatar_value]) + '" alt="" data-avatar-path="' +
+      escHtml(row.avatar_value) + '">' +
       "</span>";
   }
 
@@ -133,6 +135,64 @@ function avatarHtml(uid, name, cls) {
   const preset = (row && presetOf(row.avatar_value)) || defaultPreset((row && row.nickname) || name);
   return '<span class="fx-avatar ' + extra + '" aria-hidden="true" style="background:' +
     preset.bg + ";color:" + preset.fg + '">' + escHtml(String(preset.word || "匿")) + "</span>";
+}
+
+/* ============================================================
+   头像签名 URL 的「续签」（Day 22 补）
+
+   头像的签名地址有效期 3600 秒（SDK 上限），而且**绝不入库**（见 api-contract 第三节），
+   所以「续签」只能就地重签、不能持久化。页面长时间开着不动时，签名会在背后悄悄失效 ——
+   等某一次重新渲染头像时就会拿到过期地址，用户看到的是裂图。
+
+   两道兜底，都不打扰用户：
+     · 加载失败（onerror）→ 重签一次再加载；同一张图只重试一次，避免真裂时无限循环；
+     · 每 50 分钟主动重签一次（比 3600 秒提前 10 分钟）→ 长开的页面也不会用到过期地址。
+   重签失败只记一笔日志、不弹错：头像不是核心功能，最坏情况是回落到预设块。
+   ============================================================ */
+
+const AVATAR_RESIGN_MS = 50 * 60 * 1000;
+let __resigning = false;
+
+/** 重新签名所有已知头像路径，并把页面上已渲染的头像换成新地址 */
+async function resignAvatarUrls() {
+  if (__resigning || typeof document === "undefined") return;
+  const paths = Object.keys(__avUrls);
+  if (!paths.length) return;   // 没有上传头像的页面：零开销，连请求都不发
+  __resigning = true;
+  try {
+    const fresh = await api.signAvatarUrls(paths);
+    Object.keys(fresh).forEach((p) => { __avUrls[p] = fresh[p]; });
+    document.querySelectorAll("img[data-avatar-path]").forEach((img) => {
+      const p = img.getAttribute("data-avatar-path");
+      if (fresh[p] && img.getAttribute("src") !== fresh[p]) {
+        img.removeAttribute("data-avatar-retried");   // 换成新地址了，允许它再失败一次
+        img.setAttribute("src", fresh[p]);
+      }
+    });
+  } catch (err) {
+    console.warn("[profile] 头像签名续签失败（保持原地址）：", err && err.message);
+  } finally {
+    __resigning = false;
+  }
+}
+
+if (typeof document !== "undefined") {
+  // error 事件不冒泡，必须用捕获阶段在 document 上接
+  document.addEventListener("error", (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== "IMG") return;
+    if (!img.getAttribute || !img.getAttribute("data-avatar-path")) return;
+    if (img.hasAttribute("data-avatar-retried")) return;   // 已经重试过，别再试
+    img.setAttribute("data-avatar-retried", "1");
+    resignAvatarUrls();
+  }, true);
+
+  setInterval(resignAvatarUrls, AVATAR_RESIGN_MS);
+
+  // 标签页从后台回来时补一次：后台期间定时器可能被浏览器节流
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") resignAvatarUrls();
+  });
 }
 
 /* ============================================================
