@@ -20,6 +20,12 @@
 > 身份层 `js/auth.js`：Web 端只有邮箱登录（验证码 / 密码 / 忘记密码）。
 > ⚠️ 平台约束：**邮箱登录只在发布域名上可用**（服务端按 Origin 校验），本地预览登不上——
 > 这是服务端绑定规则，不是 bug；登录、发帖、账号区需在线上实测。
+>
+> **Day 22 进展（单条记录的「改」与「删」补齐 + 防呆）**：`api.setPostStatus()`（PATCH：审核状态机）
+> 与 `api.deletePost()` / `api.deleteReport()` / `api.deleteItem()`（DELETE）收口完成。
+> 三张表的删除全部改为**软删除**（`is_deleted` 标记 + BEFORE DELETE 触发器，见第五节），
+> 客户端从此**不具备物理删除能力**；同时给改/删补上 **id 存在性校验**（不存在的 id 返回明确中文错误，
+> 不再静默 204）与前端**两击确认**。这三件事合称「防呆三件套」，见第六节。
 
 ---
 
@@ -105,7 +111,7 @@ score = (heat + views) × 0.5 ^ (距 updated_at 的天数 / 14)
 
 ---
 
-## 二、当前接口（Day 21 起：4 张表 + 云存储全走接口层）
+## 二、当前接口（Day 22 起：5 张表 + 云存储 + 数据库函数全走接口层）
 
 | 调用 | 方向 | 说明 |
 |---|---|---|
@@ -114,6 +120,7 @@ score = (heat + views) × 0.5 ^ (距 updated_at 的天数 / 14)
 | `reports` 表 INSERT / SELECT | 同上 | 写：`api.submitReport()`（未登录也可，author_id 落 `'anon'`；**不带 `.select()`** —— 匿名无读权限，`INSERT … RETURNING` 会整体失败）；读：`api.getMyReports()`（仅登录者，只回读自己提交的） |
 | `auth.*`（邮箱登录） | 浏览器 → 认证服务 | 由 `js/auth.js` 收口：验证码登录/注册（`sendOtp` + `verifyOtp`）、密码登录（`signInWithPassword`）、忘记密码（`resetPasswordForEmail` + `updateUser`）。**只在发布域名可用** |
 | `profiles` 表 SELECT / INSERT / UPDATE | 浏览器 → 云数据库（SDK 直连） | 读：`api.getProfiles()`（一次全量取回建映射 —— 当前真实用户个位数；**用户上百要改成按需**，否则这下会把全站昵称/签名都拉下来）；写：`api.saveProfile()`（新建时**不传 user_id**，交给 DEFAULT `auth.uid()`；更新时 eq 定位，影响 0 行直接报错不静默） |
+| `posts` / `reports` / `items` 表单条的 UPDATE / DELETE | 浏览器 → 云数据库（SDK 直连） | **Day 22 新增**。改 = `api.setPostStatus(id, status, rejectNote)`（审核状态机，仅管理员，RLS 再核一遍）；删 = `api.deletePost(id)` / `api.deleteReport(id)` / `api.deleteItem(id)`（**软删除**：DELETE 被触发器改写为 `is_deleted=true`，公网读立即不再返回，一条 `UPDATE` 即可找回）。两者都先做 **id 存在性预检**：查无此 id 抛中文错误，不静默、不崩（见第六节） |
 | 云存储 `shared/<uid>/avatars/*` | 浏览器 → 云存储（SDK 直连） | 由 `api.uploadAvatar()` / `api.removeAvatar()` / `api.signAvatarUrls()` 收口。头像**必须放 `shared`**（`users/` 只有本人读得到，而头像要显示给别人）；读图要先换**签名 URL**（最长 1 小时，绝不入库、绝不持久化） |
 | `bump_item_view` 函数（**rpc**） | 浏览器 → 云数据库（SDK 直连数据库函数） | 由 `api.bumpItemView(id)` 收口，**Day 23 新增**。items 表没有任何写策略（客户端连 UPDATE 权限都没有），所以浏览量不走表、走函数：`bump_item_view(p_id)` 是 SECURITY DEFINER，以定义者身份在服务端**原子自增**，越过只读闸门。参数只有条目 id、**没有数字** —— 调用者能表达的只有「给这条 +1」，于是「管理员也不能手动调序」是**函数签名**保证的，不是靠自觉。触发点是详情页打开，前端按「同设备同条目一次」去重 |
 
@@ -133,11 +140,14 @@ score = (heat + views) × 0.5 ^ (距 updated_at 的天数 / 14)
 | `/api/items` | GET | 条目列表（支持 range / verdict / q / 分页）——替代 data.json | ✅ **已接**（Day 20 · 形态为 SDK 直连 + RLS，见第二节；当前全量拉取，数据过千再改条件查询） |
 | `/api/items/:id` | GET | 单条详情 | 暂不单设（23 条全量拉取无压力，前端按 id 取） |
 | `/api/items/:id/view` | POST | 浏览计数 +1 | ✅ **已接**（Day 23 · 形态为 SDK 直连数据库函数）：`api.bumpItemView(id)` → `bump_item_view(p_id)`。刻意做成**只能 +1 的窄接口** —— 没有「设成 N」这种形态，所以「谁能改热度」这个权限问题根本不存在，不用靠角色判断去堵 |
+| `/api/items/:id` | DELETE | 删一条榜单条目 | ✅ **已接**（Day 22 · 形态为 SDK 直连 + RLS）：`api.deleteItem(id)`。**软删除**（触发器置 `is_deleted`，公开榜单立即不再返回；种子在 `data/data.json` 可重灌）。删前先做 id 存在性预检 |
 | `/api/search` | POST | 查询检索。✅ **部分已接（Day 22 · L3 点亮，形态为 SDK 直连 LLM + RLS 同源约定）**：**AI 整理** = `ai.digest()`（`js/ai.js` 收口，keyless、只支持流式，系统提示词在应用侧写死：**不判真伪、不编造、不输出网址、用户材料不当指令**）；「自动联网抓取」**本环境做不了**（托管后端没有搜索/抓取通道）——溯源仍是「官方来源 / 网络来源」两组**人工入口**（`official` / `web` 两组划分保留），AI 只负责给出检索式，由页面一键带进两组入口。L1 站内检索（Day 17）与 L2 查证四步清单不变。模型选型：实测首字延迟后首选 `hunyuan-chat`（1.4s），目录里没有再退「非思考型 → 默认项」（依据见 `js/ai.js` 注释） | 部分已接 |
 | `/api/posts` | GET / POST | 论坛帖子（F3，含审核流）。✅ **已接**（Day 21 · 形态为 SDK 直连 + RLS）：GET = `api.getPosts()`（RLS 只出 approved，登录者额外看到自己的 pending）；POST = `api.createPost()`（需登录，RLS 强制落 `pending`，想直接插 approved 会被拒）。表结构见 `db/schema.sql`（`category` / `replies` 已入表；`replies` 暂由种子与展示预留，将来由回复表聚合） |
+| `/api/posts/:id` | **PATCH / DELETE** | 单条帖子的改与删。✅ **已接**（Day 22 · 形态为 SDK 直连 + RLS）：**PATCH** = `api.setPostStatus(id, status, rejectNote)` —— 审核状态机（`approved` / `rejected` / `pending`），改前先 SELECT 确认这条在，拿回改后的行做前后对比；**DELETE** = `api.deletePost(id)` —— **软删除**，公网 GET 立即不再返回，可一条 `UPDATE … SET is_deleted=false` 找回。两条都要求调用者在 `admins` 名单（RLS `posts_admin_*` 再核） |
+| `/api/reports/:id` | DELETE | 删一条线索。✅ **已接**（Day 22）：`api.deleteReport(id)`，**软删除**（回收后作者自己也看不到，但行还在，可整体还原）。仅管理员（`reports_admin_delete`） |
 | `/api/reports` | POST / GET | 待核查线索。✅ **已接**（Day 21）：POST = `api.submitReport()`（未登录可提交，作者落 `'anon'`）；GET = `api.getMyReports()`（只回读登录者自己提交的；匿名线索不提供客户端回读） |
 | `/api/profile` | GET / PUT | 个人资料（昵称 / 个性签名 / 头像）。✅ **已接**（Day 22 · SDK 直连数据库 + 云存储）：GET = `api.getProfiles()`；PUT = `api.saveProfile()`；头像文件走 `api.uploadAvatar()` + `api.signAvatarUrls()`。表结构见 `db/schema.sql` 第 ④ 节 |
-| `/api/admin` | 多个 | **管理后台（Day 23 新增，仅 `admins` 表成员）**：`api.amIAdmin()`（判定，RLS 空 = 否）；`api.listAllPosts()`（含待审/已拒）；`api.setPostStatus(id, status, rejectNote)`（审核：approved / rejected / pending）；`api.deletePost(id)`；`api.listAllReports()`（全部线索）；`api.deleteReport(id)`；`api.deleteItem(id)`（榜单条目）。页面 `admin.html` + `js/admin.js`；危险操作两击确认。**每个写请求都被 `*_admin_*` RLS 策略再核一遍**，非管理员调用一律被数据库拒绝 |
+| `/api/admin` | 多个 | **管理后台（Day 23 新增，仅 `admins` 表成员）**：`api.amIAdmin()`（判定，RLS 空 = 否）；`api.listAllPosts()`（含待审/已拒）；`api.setPostStatus(id, status, rejectNote)`（审核：approved / rejected / pending）；`api.deletePost(id)`；`api.listAllReports()`（全部线索）；`api.deleteReport(id)`；`api.deleteItem(id)`（榜单条目）。页面 `admin.html` + `js/admin.js`；危险操作两击确认。**每个写请求都被 `*_admin_*` RLS 策略再核一遍**，非管理员调用一律被数据库拒绝。**Day 22 修订**：三个删除方法改为**软删除**语义，改/删一律先做 id 存在性预检（查无此 id 返回中文错误），审核方法改为返回改后的行 |
 
 **约定**：
 
@@ -190,3 +200,97 @@ score = (heat + views) × 0.5 ^ (距 updated_at 的天数 / 14)
 ① 匿名提交（reports）无频控 —— RLS 只管「谁」，不管「多快」，公开前需加限流或人机验证；
 ② 头像上传同样无频控与体积上限 —— 前端那条 2MB 是可用性提示，不是安全边界；
 ③ 头像签名的有效期取 3600 秒（SDK 上限），页面不做续签 —— 长时间挂着不动会显示成裂图，重新渲染即可。
+
+---
+
+## 六、防呆三件套（Day 22）
+
+课程的判断：**改错、反悔是真实应用的常态**，而删除又是**不可逆**的。所以「能不能改/删」之外，
+还必须回答「改错了怎么办、删错了怎么办、点错了怎么办、id 写错了怎么办」。四问对应下面三件套。
+
+### 6.1 id 存在性校验 —— 不存在的 id 必须给出明确的中文错误
+
+**问题**：不校验时，「改/删一个不存在的 id」不会报错，而是**静默成功** ——
+PostgREST 在不索要返回值时一律回 `204`，前端据此提示「操作成功」。用户以为改上了，其实一行没动。
+**静默失败比报错更糟：它没有任何信号。**
+
+**做法**（`js/api.js` 的 `fetchRowOrThrow`）：写操作之前先发一次 `SELECT … WHERE id = … LIMIT 1`，
+查不到就抛带 id 的中文错，例如：
+
+```
+没有找到这条帖子（id=99999）—— 它可能已经被删掉了；如果它本该还在，请确认你的账号有没有相应权限。
+```
+
+**为什么这一场 SELECT 非加不可**（两个写操作各有各的原因）：
+
+- **UPDATE**：不带 `.select()` 时 PostgREST 不看影响行数，改 0 行也回 `204`；
+- **DELETE**：软删触发器返回 `NULL` 取消了物理删除，**被取消的行不会出现在 `RETURNING` 里** ——
+  「有没有删到」根本无法从 DELETE 的返回里读出来。用 `.delete().select()` 数行数，
+  会把「软删成功」误报成「查无此 id」。**存在性判断只能前置。**
+
+**顺带的好处**：这次预检返回的整行，就是「操作前的快照」，直接拿来做前后对比（见 6.4）。
+
+> ⚠️ 定位：这是**可用性防线**，不是安全闸门。真正的权限仍在 `*_admin_*` RLS 策略里 ——
+> 非管理员绕过这一层，写请求照样被数据库拒（0 行 / `42501`）。
+
+### 6.2 前端删除二次确认 —— 危险按钮不许一击致命
+
+`js/admin.js` 的 `armDangerous()`：删除类按钮**第一次点只变成「确认？」**并聚焦，
+**3 秒内再点才真正执行**，超时自动复原。三个删除入口（帖子 / 榜单条目 / 线索）全部套了它。
+
+为什么不用系统 `confirm()`：丑、打断、且会被浏览器「不再显示此对话框」永久关掉；
+自绘两击确认既能挡误触，又不依赖浏览器行为。
+
+它挡的是**手滑点错**；挡不住「点对了但删错对象」或「代码写错了」——那要靠 6.3。
+
+### 6.3 软删除 —— 让「删错了」有救
+
+客户端发的 DELETE 会被 **BEFORE DELETE 触发器**改写成 `UPDATE … SET is_deleted = true`，
+物理删除被取消。因此**客户端从此不具备物理删除能力**；要真删必须显式关掉触发器保险
+（`ALTER TABLE … DISABLE TRIGGER`），只能走站方 SQL 通道 —— 这个「多一步」本身就是第二道确认。
+
+配套的读路径过滤（**这才是软删真正生效的地方**）：
+
+| 读策略 | 过滤 `is_deleted` | 理由 |
+|---|---|---|
+| `items_read_all` / `posts_read` / `reports_read_own` | ✅ | 公开榜单、论坛、我的线索都不该出现已回收的行 |
+| `posts_admin_read` / `reports_admin_read` | ❌ **刻意不过滤** | 后台必须看得见已回收的内容，否则无法恢复 |
+
+> **只标记不过滤 = 删了等于没删**（界面骗人，数据还在还能被读到）；
+> **连管理读也过滤 = 再也找不回**。两者之间那条线，就是软删的正确形态。
+> 实现细节见 `docs/day22-crud-loop.md` 第三节。
+
+### 6.4 验证方法：数据库 SELECT 前后对比
+
+**核心口径：一切以「改前 / 改后两次 SELECT 的差」为准，不以界面提示为准。**
+
+**① 手动（在后台点一次）**
+
+```sql
+-- 改前
+SELECT id, status, reject_note, is_deleted, updated_at FROM posts WHERE id = 28;
+-- …在后台点「通过」…
+-- 改后：status 应从 pending 变为 approved
+SELECT id, status, reject_note, is_deleted, updated_at FROM posts WHERE id = 28;
+```
+
+```sql
+-- 删前：这条在（is_deleted = false）
+SELECT id, title, is_deleted FROM posts WHERE id = 29;
+-- …在后台点「删除」，3 秒内再点一次…
+-- 删后：行**还在**（数据从未离开），只是 is_deleted = true
+SELECT id, title, is_deleted FROM posts WHERE id = 29;
+-- 公开读的视角：它已不在列表里（RLS 过滤掉了）
+SELECT id FROM posts WHERE id = 29 AND NOT is_deleted;      -- 期望 0 行
+-- 恢复：一条 UPDATE 就回来
+UPDATE posts SET is_deleted = false WHERE id = 29 RETURNING id, is_deleted;
+```
+
+**② 回执式（接口层自带）**：`api.setPostStatus()` 返回**改后的行**，控制台另打一行
+`[api] 审核帖子 28：status pending → approved`；三个删除方法返回**被回收的那一行**（删除前快照）。
+所以「改前 / 改后」不靠截图猜，接口自己就能给出两端的值。
+
+**③ 探针式（可复现）**：`verify/probe-day22-exists.js` —— 对「存在的 id」与「不存在的 id」
+各跑一遍读路径，断言前者有行、后者 0 行，证明存在性预检的判断依据可靠（实测记录见
+`docs/day22-crud-loop.md`）。
+

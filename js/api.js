@@ -1,5 +1,5 @@
 /* ============================================================
-   api.js — 数据接口层（Day 20 接读接口 · Day 21 接写接口）
+   api.js — 数据接口层（Day 20 接读接口 · Day 21 接写接口 · Day 22 补改/删防呆）
 
    【它在整个作品里的位置】
      页面脚本（home.js / detail.js / search.js / mine.js / forum.js）
@@ -105,6 +105,43 @@ function describeStorageError(error) {
   if (status === 413 || /too large|exceed|maximum/i.test(msg)) return "图片太大了，换一张小一点的（2MB 以内）。";
   if (status === 422 || /mime|content-?type|not supported/i.test(msg)) return "只支持 JPG / PNG / WebP 三种图片。";
   return "头像上传失败：" + (msg || code || "未知错误");
+}
+
+/* ---------------- 单条记录的「存在性预检」（Day 22 防呆） ----------------
+
+   课程要求：操作一个**不存在的 id** 时，接口要给出**明确的中文错误**，不能静默、不能崩。
+
+   为什么这里必须单独发一场 SELECT，而不是靠写操作自己报错：
+
+     · PATCH：PostgREST 在不索要返回值时，不管改到几行都只回 204 ——
+       传个不存在的 id 也「成功」，用户以为改上了，实际一行没动（静默失败最坑）；
+     · DELETE：三张表都装了 BEFORE DELETE 触发器把物理删除改写成「置 is_deleted」，
+       触发返回 NULL 取消了这次删除 —— **被取消的行不会出现在 RETURNING 里**，
+       所以「删到没删到」根本无法从 DELETE 的返回里看出来。
+       用 `.delete().select()` 去数行数，会把「软删成功」误报成「查无此 id」。
+
+   所以：把「这条在不在」的判断**前置到写操作之前**，一次 SELECT 说清楚。
+
+   ⚠️ 定位要说清：这是**可用性防线**（把「查无此 id」翻成人话、拦住无效请求），
+      **不是安全闸门**。真正的权限仍在各表 *_admin_* RLS 策略里 ——
+      非管理员即便绕过这一层，写请求照样被数据库拒（0 行或 42501）。
+
+   返回查到的整行：它顺带就是需求里要的「操作前的快照」，可直接拿来做前后对比。 */
+async function fetchRowOrThrow(table, id, label) {
+  const rows = unwrap(
+    await getCloudClient().database.from(table).select("*").eq("id", id).limit(1),
+    label + "预检"
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) {
+    const e = new Error(
+      "没有找到这条" + label + "（id=" + id + "）—— 它可能已经被删掉了；" +
+      "如果它本该还在，请确认你的账号有没有相应权限。"
+    );
+    e.code = "NOT_FOUND";
+    throw e;
+  }
+  return row;
 }
 
 const api = {
@@ -382,28 +419,59 @@ const api = {
     return Array.isArray(data) ? data : [];
   },
 
-  /** 审核：status 只认 approved / rejected / pending（pending 用于「撤回下架」） */
+  /**
+   * 审核（PATCH）：status 只认 approved / rejected / pending（pending 用于「撤回下架」）。
+   *
+   * Day 22 补「防呆」三步，缺一不可：
+   *   ① 改之前先 SELECT 确认这条在 —— 不在就抛中文错，不让「改 0 行」冒充成功；
+   *   ② 改的时候带 `.select()` 拿回**改后的行** —— 既是回执，也是「改前/改后」的对比素材；
+   *   ③ 万一预检过了、写入却 0 行（策略把这次改动滤掉了），再给一条权限方向的提示，
+   *      任何情况都不静默通过。
+   * 返回改后的行（含 status / reject_note / updated_at）。控制台另记一行「改前 → 改后」。
+   */
   async setPostStatus(id, status, rejectNote) {
     if (["approved", "rejected", "pending"].indexOf(status) === -1) {
       throw new Error("不合法的审核状态。");
     }
+    const before = await fetchRowOrThrow("posts", id, "帖子");
+
     const patch = { status: status, updated_at: new Date().toISOString() };
     if (status === "rejected") patch.reject_note = rejectNote || "";
     if (status === "approved") patch.reject_note = "";   // 过审顺手清掉旧理由
 
-    unwrap(
-      await getCloudClient().database.from("posts").update(patch).eq("id", id),
+    const data = unwrap(
+      await getCloudClient().database.from("posts").update(patch).eq("id", id).select(),
       "帖子审核"
     );
-    return true;
+    const after = Array.isArray(data) ? data[0] : data;
+    if (!after) {
+      const e = new Error(
+        "这条帖子没有改动（id=" + id + "）—— 数据库把这次改动拒了，多半是账号没有管理权限。"
+      );
+      e.code = "FORBIDDEN";
+      throw e;
+    }
+    console.log("[api] 审核帖子 " + id + "：status " + before.status + " → " + after.status);
+    return after;
   },
 
+  /**
+   * 删帖（DELETE → 软删除）。Day 22 补防呆：删之前先确认这条在，
+   * 不在就抛中文错，而不是默默回 204 让人以为删掉了。
+   *
+   * 为什么存在性判断必须前置、不能用 `.delete().select()` 数行数：
+   * 触发器把物理删除取消了，被取消的行**不会出现在 RETURNING 里** ——
+   * 数行数会把「软删成功」误报成「查无此 id」。详见 fetchRowOrThrow 的注释。
+   * 返回被回收的那一行（删除前的快照）。
+   */
   async deletePost(id) {
+    const row = await fetchRowOrThrow("posts", id, "帖子");
     unwrap(
       await getCloudClient().database.from("posts").delete().eq("id", id),
       "帖子删除"
     );
-    return true;
+    console.log("[api] 已回收帖子 " + id + "（软删除：is_deleted=true，公网 GET 立即不再返回）");
+    return row;
   },
 
   /** 管理员读全部线索（普通登录用户只能回读自己的，RLS 定的） */
@@ -416,20 +484,25 @@ const api = {
     return Array.isArray(data) ? data : [];
   },
 
+  /** 删线索（软删除）。Day 22 防呆：先确认这条在，不在即抛中文错。返回删除前的行。 */
   async deleteReport(id) {
+    const row = await fetchRowOrThrow("reports", id, "线索");
     unwrap(
       await getCloudClient().database.from("reports").delete().eq("id", id),
       "线索删除"
     );
-    return true;
+    console.log("[api] 已回收线索 " + id + "（软删除）");
+    return row;
   },
 
-  /** 榜单条目删除（删错可从 data/data.json 重新灌回，数据有种子兜底） */
+  /** 榜单条目删除（软删除；删错可从 data/data.json 重新灌回，数据有种子兜底） */
   async deleteItem(id) {
+    const row = await fetchRowOrThrow("items", id, "条目");
     unwrap(
       await getCloudClient().database.from("items").delete().eq("id", id),
       "条目删除"
     );
-    return true;
+    console.log("[api] 已回收条目 " + id + "（软删除）");
+    return row;
   },
 };

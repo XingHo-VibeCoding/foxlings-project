@@ -100,7 +100,7 @@ DELETE FROM posts WHERE id = ...;
 ALTER TABLE posts ENABLE  TRIGGER trg_posts_soft_delete;
 ```
 
-要关掉保险才能真删——这个"多一步"本身就是我们加的第二道确认。三条语句已实测走通（见第五节清理记录）。
+要关掉保险才能真删——这个"多一步"本身就是我们加的第二道确认。三条语句已实测走通（见第四节实测记录）。
 
 ### 3.4 三个必须讲清的细节
 
@@ -140,7 +140,117 @@ is_deleted 列 3 个（items / posts / reports，NOT NULL）
 
 ---
 
-## 五、待人工完成：管理员端的端到端（PATCH / DELETE）
+## 五、防呆补做：id 存在性校验 + 前后对比验证（2026-10-10 晚）
+
+§三 讲的软删除解决了「删错了怎么办」。课程还要求另外两件：**点错了怎么办**（前端二次确认，
+Day 23 就写好的两击确认，见第一节「你在哪加了确认？」）与 **id 写错了怎么办**（接口必须给明确中文错误）。
+本节补上后者，并给出「数据库 SELECT 前后对比」的标准验证方法。
+
+### 5.1 问题：不校验时，「改/删一个不存在的 id」是**静默成功**
+
+PostgREST 在不索要返回值时一律回 `204`。于是：
+
+```
+PATCH  /posts?id=eq.99999   { status: "approved" }  →  204（一行没改，却报成功）
+DELETE /posts?id=eq.99999                           →  204（一行没删，也报成功）
+```
+
+**静默失败比报错更糟：它没有任何信号。** 用户以为操作生效了，界面也会照着说「操作成功」。
+
+### 5.2 为什么存在性判断必须**前置**，不能靠写操作自己报错
+
+这是本节最容易做错的地方 —— 两个写操作各有各的坑：
+
+| 操作 | 为什么它的返回值**不能**用来判断存在性 |
+|---|---|
+| `UPDATE` | 不带 `.select()` 时 PostgREST 不看影响行数，改 0 行也回 `204` |
+| `DELETE` | 软删触发器返回 `NULL` 取消了物理删除，**被取消的行不会出现在 `RETURNING` 里** —— 用 `.delete().select()` 数行数，会把「软删成功」误报成「查无此 id」 |
+
+所以 `js/api.js` 新增 `fetchRowOrThrow()`：写之前先发一次
+`SELECT * FROM <表> WHERE id = X LIMIT 1`，查不到就抛带 id 的中文错：
+
+```
+没有找到这条帖子（id=99999）—— 它可能已经被删掉了；如果它本该还在，请确认你的账号有没有相应权限。
+```
+
+> ⚠️ 定位：这是**可用性防线**（把「查无此 id」翻成人话、拦住无效请求），**不是安全闸门**。
+> 权限仍全在 `*_admin_*` RLS 策略里 —— 非管理员绕过这一层，写请求照样被数据库拒。
+> 顺带的好处：预检返回的整行 = 「操作前的快照」，直接拿来做前后对比（5.5）。
+
+### 5.3 实测挖出的分寸：预检的「0 行」是**对当前身份**而言
+
+预检用的 SELECT 走的是和普通读一样的 RLS，所以「0 行」同时覆盖三种情况：
+① 真的不存在；② 存在但当前身份看不见（如匿名看 `pending` 帖）；③ 已被软删（公开读策略把它过滤了）。
+
+`verify/probe-day22-exists.js` 实测（匿名只读通道，**5/5**）：
+
+| 情形 | 靶子 id | REST 返回 | 预检判定 |
+|---|---|---|---|
+| 条目 · 真实存在且公开可读 | `20251120-01` | 200，1 行 | 「在」✅ |
+| 条目 · 人造不存在的 id | `__no_such_item_day22__` | 200，0 行 | 「查无此 id」✅ |
+| 帖子 · 已通过审核 | `3` | 200，1 行 | 「在」✅ |
+| 帖子 · 存在但匿名看不到（pending） | `7` | 200，**0 行** | 对匿名「查无」，对管理员「在」✅ |
+| 帖子 · 人造不存在的 id | `99999` | 200，0 行 | 「查无此 id」✅ |
+
+第 4 行正是错误文案要带「请确认你的账号有没有相应权限」的原因 ——
+**对后台唯一的真实调用者（管理员）来说**，管理读策略让情况 ② 不成立，预检就精确等价于「这条在不在」。
+（`reports` 无匿名读策略，匿名恒 401，预检只在管理员会话下有意义 —— 探针如实记录，不当作断言。）
+
+### 5.4 守卫本身怎么验：桩掉云客户端，跑**真实代码**
+
+匿名通道证明不了「那段守卫真的会抛中文错」。于是 `verify/probe-day22-guard-unit.js`
+把云客户端桩掉，用 `vm` 加载 **`js/api.js` 的真实源文件**（不是复述逻辑），断言它抛什么、返回什么：
+
+| # | 场景 | 结果 |
+|---|---|---|
+| ① | PATCH 不存在的 id | 抛「没有找到这条帖子（id=99999）」，`code=NOT_FOUND` ✅ |
+| ② | PATCH 存在的 id | 返回改后的行；且 update 之后确实带了 `.select()` ✅ |
+| ③ | PATCH 预检过了但写入 0 行（策略滤掉） | 抛「没有改动」，`code=FORBIDDEN` ✅ |
+| ④ | PATCH 非法状态值 | 抛「不合法的审核状态。」 ✅ |
+| ⑤⑥⑦ | DELETE 三张表 · 不存在的 id | 各抛对应中文错，`code=NOT_FOUND` ✅ |
+| ⑧ | DELETE 存在的 id | 返回**删除前的快照** ✅ |
+
+**结果：8/8 PASS。**
+
+**反向验证**（沿用 Day 21 纪律 —— 断言必须真的会变红）：把 `HEAD` 版本的旧 `api.js`
+导出成对照文件，跑**同一套断言** → **1/8 PASS，7 项 FAIL**（唯一过的 ④ 是旧代码本来就有的状态校验）。
+这 7 条新断言确实在测新守卫，不是假绿。
+
+### 5.5 数据库 SELECT 前后对比的验证方法（标准口径）
+
+**口径：一切以「改前 / 改后两次 SELECT 的差」为准，不以界面提示为准。**
+
+改（PATCH）：
+
+```sql
+-- 改前
+SELECT id, status, reject_note, is_deleted, updated_at FROM posts WHERE id = 28;
+-- …在后台点「通过」…
+-- 改后：status 应从 pending 变为 approved
+SELECT id, status, reject_note, is_deleted, updated_at FROM posts WHERE id = 28;
+```
+
+删（DELETE，软删）：
+
+```sql
+-- 删前：这条在（is_deleted = false）
+SELECT id, title, is_deleted FROM posts WHERE id = 29;
+-- …在后台点「删除」，3 秒内再点一次…
+-- 删后：行**还在**（数据从未离开），只是 is_deleted = true
+SELECT id, title, is_deleted FROM posts WHERE id = 29;
+-- 公开读的视角：它已不在列表里（RLS 过滤掉了）
+SELECT id FROM posts WHERE id = 29 AND NOT is_deleted;   -- 期望 0 行
+-- 恢复：一条 UPDATE 就回来
+UPDATE posts SET is_deleted = false WHERE id = 29 RETURNING id, is_deleted;
+```
+
+三条通道互为交叉验证：**手动 SQL**（上面）、**接口回执**（`setPostStatus` 返回改后的行、
+控制台另打 `[api] 审核帖子 28：status pending → approved`；三个删除方法返回删除前快照）、
+**探针**（5.3 判断依据 / 5.4 守卫本身）。
+
+---
+
+## 六、待人工完成：管理员端的端到端（PATCH / DELETE）
 
 **为什么必须人工**：接口层的正确性只能由**真实管理员的 REST 请求**证明。已经排除的替代方案：
 
@@ -158,24 +268,32 @@ is_deleted 列 3 个（items / posts / reports，NOT NULL）
 
 ---
 
-## 六、改动文件清单（按归属）
+## 七、改动文件清单（按归属）
 
 | 文件 | 改动 | 归属 |
 |---|---|---|
 | `db/schema.sql` | 三张表加 `is_deleted` 列（含 `ADD COLUMN IF NOT EXISTS` 迁移，紧跟各建表语句）；`bump_item_view` 跳过已回收条目；三条公开读策略加 `NOT is_deleted`；新增 `soft_delete_rows()` 函数 + 三个 BEFORE DELETE 触发器 | **Day 22** |
+| `js/api.js` | 新增 `fetchRowOrThrow()` 存在性预检；`setPostStatus` 补「预检 + `.select()` 回执 + 0 行提示」并返回改后的行；`deletePost` / `deleteReport` / `deleteItem` 补预检并返回删除前快照 | **Day 22**（晚·防呆） |
+| `api-contract.md` | 登记 PATCH/DELETE 三条接口并标「已实现」（`/api/posts/:id`、`/api/reports/:id`、`/api/items/:id`）；新增第六节「防呆三件套」 | **Day 22**（晚·防呆） |
 | `verify/probe-day22-gate.js` | 新增：PATCH/DELETE 闸门矩阵探针（哨兵 id，零破坏） | **Day 22** |
-| `docs/day22-crud-loop.md` | 本文档 | **Day 22** |
+| `verify/probe-day22-exists.js` | 新增：id 存在性预检的判断依据核验（匿名只读通道，5/5） | **Day 22**（晚·防呆） |
+| `verify/probe-day22-guard-unit.js` | 新增：守卫单元级验证（`vm` 加载真实 `api.js`，8/8；附反向验证 1/8） | **Day 22**（晚·防呆） |
+| `docs/day22-crud-loop.md` | 本文档（含第五节防呆补做） | **Day 22** |
 
-> `js/api.js` / `js/admin.js` **一行未改** —— 触发器方案的全部收益就在这里。
+> **更正**：早先版本写「`js/api.js` / `js/admin.js` 一行未改」—— 那只对**软删除**成立
+> （触发器方案确实零前端改动）。当晚补「防呆」时改了 `js/api.js`（存在性预检），
+> `js/admin.js` 仍**一行未改**（两击确认 Day 23 就写好了）。
 > 云端数据库：策略定义已随 `schema.sql` 重跑同步（15 条全部 DROP+CREATE，读到的是文件里的定义）。
 
 ---
 
-## 七、已知边界 / 待办
+## 八、已知边界 / 待办
 
 | # | 事项 | 状态 |
 |---|---|---|
 | 1 | 后台没有「已回收」视图与「恢复」按钮 —— 目前恢复靠站方 SQL（`UPDATE … SET is_deleted=false`） | **待做**（需改 `admin.js` 并重新发布） |
-| 2 | 管理员端的 PATCH / DELETE 端到端验证 | **等人工**（见第五节） |
+| 2 | 管理员端的 PATCH / DELETE 端到端验证 | **等人工**（见第六节） |
 | 3 | 匿名提交频控 / 头像上传频控与体积上限 / 签名 URL 续签 | 旧待办，未动 |
 | 4 | `items` 的软删与"不能改热度"的张力：`items` 没有 UPDATE 策略，所以条目只能由触发器置 `is_deleted`，**管理员仍然无法手动改热度**（该保证未被削弱） | 已确认 |
+| 5 | 存在性预检是「先查后写」两步，理论上有 TOCTOU 窗口（查完到写之间那条被别人删掉）—— 单条记录 + 管理员低频操作，当前规模可忽略 | 已知取舍 |
+| 6 | 本节的守卫验证只覆盖 `api.js` 这一层（桩掉云客户端）。**真实登录态下**「点一次、抛一次中文错」仍需人工在线上跑一遍 | 等人工（同第 2 条） |

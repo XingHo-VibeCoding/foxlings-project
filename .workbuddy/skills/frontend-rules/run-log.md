@@ -196,3 +196,14 @@
   （`#header-avatar` 其实是 `<span>`，链接在外层 `a#header-me`；`#mode-trace` 是 hidden 容器，切换要点
   `#search-modes` 里的按钮）—— **探针报红先怀疑探针**，别急着当产品 bug 报出去。
 - **证据**：`verify/probe-day21-regress.js`（12/12）、`verify/day21-regress-{search,board,mine}.png`
+
+## 2026-10-10 晚（Day 22 · 防呆补做后复跑）
+- **调用方式**：手动调用脚本（`node .workbuddy/skills/frontend-rules/check-frontend.js`，需本地服务
+  `python -m http.server 8000 --bind 127.0.0.1` 在跑）
+- **被检查对象**：`js/api.js` 新增存在性预检（`fetchRowOrThrow`）+ `setPostStatus` 改造后的全站回归
+- **Skill 自身变更**：无 —— 本次只动数据接口层，门槛项未增未改，仍 113 项
+- **结果**：**ALL_PASS（113 项硬门槛全过，另有 21 项观察）**
+- **备注**：本次未触页面与样式，关键观察项与昨日一致 —— `B1_hover位移px` 仍 `0 → -4`（Day 21 修的
+  `animation-fill-mode: backwards` 没被回退）、`N7_四态明细` 四态全 true、`V4/V5` 浏览量靶子仍
+  `12 → 13` 且同设备重复打开不重复计数
+
