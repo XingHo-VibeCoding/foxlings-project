@@ -196,12 +196,16 @@ function renderAllPosts() {
   const box = document.getElementById("all-posts-list");
   const count = document.getElementById("posts-count");
   if (!box) return;
-  count.textContent = "共 " + ALL_POSTS.length + " 条";
+  const recycledCount = ALL_POSTS.filter((p) => p.is_deleted === true).length;
 
   const kw = postKeyword.trim();
   const list = kw
     ? ALL_POSTS.filter((p) => ((p.title || "") + (p.author_name || "")).indexOf(kw) !== -1)
     : ALL_POSTS;
+
+  // 条数里点明「已回收」有几条 —— 否则点完「删除」看列表条数没变，会以为「点了没反应」
+  count.textContent = "共 " + ALL_POSTS.length + " 条" +
+    (recycledCount ? "（其中已回收 " + recycledCount + " 条）" : "");
 
   if (!list.length) {
     box.innerHTML = '<p class="mine-about">没有匹配的帖子。</p>';
@@ -210,18 +214,24 @@ function renderAllPosts() {
 
   box.innerHTML = "";
   list.forEach((p) => {
+    const recycled = p.is_deleted === true;
     const el = document.createElement("article");
     el.className = "admin-row";
     el.innerHTML =
-      statusTag(p.status) +
+      (recycled ? '<span class="tag tag-recycled">已回收</span>' : statusTag(p.status)) +
       '<span class="admin-row-title">' + escHtml(p.title) + "</span>" +
       '<span class="admin-row-meta">' + escHtml(p.author_name || "匿名") + " · " + fmtTime(p.created_at) + "</span>" +
-      '<div class="admin-row-actions">' +
-        (p.status === "approved"
-          ? '<button type="button" class="admin-btn-ghost" data-act="unpublish">下架（回待审）</button>'
-          : '<button type="button" class="admin-btn-ghost" data-act="back-pending">放回待审</button>') +
-        '<button type="button" class="admin-btn-danger" data-act="del">删除</button>' +
-      "</div>" +
+      (recycled
+        ? '<div class="admin-row-actions">' +
+            '<span class="admin-row-meta">公网已看不到它，数据还在</span>' +
+            '<button type="button" class="admin-btn-ghost" data-act="restore">恢复</button>' +
+          "</div>"
+        : '<div class="admin-row-actions">' +
+            (p.status === "approved"
+              ? '<button type="button" class="admin-btn-ghost" data-act="unpublish">下架（回待审）</button>'
+              : '<button type="button" class="admin-btn-ghost" data-act="back-pending">放回待审</button>') +
+            '<button type="button" class="admin-btn-danger" data-act="del">删除</button>' +
+          "</div>") +
       '<p class="compose-note" role="status"></p>';
 
     const note = el.querySelector(".compose-note");
@@ -238,7 +248,8 @@ function renderAllPosts() {
       }
     });
 
-    el.querySelector('[data-act="del"]').addEventListener("click", async (e) => {
+    const delBtn = el.querySelector('[data-act="del"]');
+    if (delBtn) delBtn.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       if (!armDangerous(btn)) return;
       btn.disabled = true;
@@ -248,6 +259,19 @@ function renderAllPosts() {
       } catch (err) {
         btn.disabled = false;
         rowSay(note, escHtml(err.message || "删除失败。"), false);
+      }
+    });
+
+    // 「恢复」不需要两击确认：它把内容拿回来，是可逆方向，点错一次再删一次就行
+    const restoreBtn = el.querySelector('[data-act="restore"]');
+    if (restoreBtn) restoreBtn.addEventListener("click", async () => {
+      restoreBtn.disabled = true;
+      try {
+        await api.restorePost(p.id);
+        await loadAll();
+      } catch (err) {
+        restoreBtn.disabled = false;
+        rowSay(note, escHtml(err.message || "恢复失败。"), false);
       }
     });
 
@@ -312,7 +336,9 @@ function renderReports() {
   const box = document.getElementById("reports-list");
   const count = document.getElementById("reports-count");
   if (!box) return;
-  count.textContent = "共 " + ALL_REPORTS.length + " 条";
+  const recycledCount = ALL_REPORTS.filter((r) => r.is_deleted === true).length;
+  count.textContent = "共 " + ALL_REPORTS.length + " 条" +
+    (recycledCount ? "（其中已回收 " + recycledCount + " 条）" : "");
 
   if (!ALL_REPORTS.length) {
     box.innerHTML = '<p class="mine-about">还没有收到线索。</p>';
@@ -321,19 +347,24 @@ function renderReports() {
 
   box.innerHTML = "";
   ALL_REPORTS.forEach((r) => {
+    const recycled = r.is_deleted === true;
     const el = document.createElement("div");
     el.className = "admin-row";
     el.innerHTML =
+      (recycled ? '<span class="tag tag-recycled">已回收</span>' : "") +
       '<span class="admin-row-title admin-row-quote">' + escHtml(r.text) + "</span>" +
       '<span class="admin-row-meta">' +
         (r.author_id === "anon" ? "匿名" : "登录用户 " + String(r.author_id).slice(0, 8) + "…") +
         " · " + fmtTime(r.created_at) + "</span>" +
       '<div class="admin-row-actions">' +
-        '<button type="button" class="admin-btn-danger" data-act="del">删除</button>' +
+        (recycled
+          ? '<span class="admin-row-meta">作者已看不到它，数据还在</span>'
+          : '<button type="button" class="admin-btn-danger" data-act="del">删除</button>') +
       "</div>" +
       '<p class="compose-note" role="status"></p>';
 
-    el.querySelector('[data-act="del"]').addEventListener("click", async (e) => {
+    const reportDel = el.querySelector('[data-act="del"]');
+    if (reportDel) reportDel.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       if (!armDangerous(btn)) return;
       btn.disabled = true;

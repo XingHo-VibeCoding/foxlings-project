@@ -474,6 +474,41 @@ const api = {
     return row;
   },
 
+  /**
+   * 恢复（PATCH）：把已回收的帖子置回 `is_deleted = false` —— 软删除的另一半。
+   *
+   * 走的还是 `posts_admin_update` 那条策略（admin 可 UPDATE），
+   * 所以**不需要新增任何数据库策略**：恢复能力一直都在（后端早就有了），
+   * 缺的只是界面入口 —— 这也是"不做物理删除"真正的收益：删错了不用找站方跑 SQL。
+   *
+   * ⚠️ 这里的 `.select()` 是必须的：UPDATE 不带 select 时 PostgREST 改 0 行也回 204，
+   *    那样「策略把这次改动滤掉了」会被误报成"恢复成功"。带上 select，拿不到行就抛错。
+   * 返回恢复后的行。
+   */
+  async restorePost(id) {
+    const before = await fetchRowOrThrow("posts", id, "帖子");
+    if (before.is_deleted !== true) {
+      throw new Error("这条帖子没有被回收，不需要恢复。");
+    }
+
+    const data = unwrap(
+      await getCloudClient().database.from("posts")
+        .update({ is_deleted: false, updated_at: new Date().toISOString() })
+        .eq("id", id).select(),
+      "帖子恢复"
+    );
+    const after = Array.isArray(data) ? data[0] : data;
+    if (!after) {
+      const e = new Error(
+        "没有恢复这条帖子（id=" + id + "）—— 数据库把这次改动拒了，多半是账号没有管理权限。"
+      );
+      e.code = "FORBIDDEN";
+      throw e;
+    }
+    console.log("[api] 恢复帖子 " + id + "：is_deleted true → false（公网 GET 会重新返回它）");
+    return after;
+  },
+
   /** 管理员读全部线索（普通登录用户只能回读自己的，RLS 定的） */
   async listAllReports() {
     const data = unwrap(

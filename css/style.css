@@ -234,6 +234,10 @@ body {
 .tag-部分属实 { background: var(--c-partial-soft); color: var(--c-partial-deep); }
 .tag-真 { background: var(--c-true-soft); color: var(--c-true-deep); }
 .tag-存疑 { background: var(--c-doubt-soft); color: var(--c-doubt-deep); }
+/* 已回收（Day 22）：后台列表里「已被软删除」的行用这个徽标。
+   刻意复用「存疑」那对已实测达标的颜色（浅底深字），不引入新色值 ——
+   新增颜色意味着要重新验一遍对比度，而这里没有非新色不可的理由。 */
+.tag-recycled { background: var(--c-doubt-soft); color: var(--c-doubt-deep); }
 
 /* 热度角标（装饰 D5）：沿用「部分属实」的暖色对，保证 4.5:1 达标 */
 .heat-badge {
