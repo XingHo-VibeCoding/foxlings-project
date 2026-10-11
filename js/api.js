@@ -77,16 +77,64 @@ function unwrap(result, what) {
   return data;
 }
 
+/* ============================================================
+   三类错误提示的统一口径（Day 23 立）
+
+   项目里所有面向用户的错误，按「错误发生在哪一段路上」归三类：
+
+     ① 网络类 —— 请求还没到服务器（断网 / 被跨域拦 / SDK 没加载）
+     ② 权限类 —— 到了服务器，但身份不够（没登录 / 不是管理员 / RLS 拒绝）
+     ③ 数据类 —— 身份够，但数据不对（不存在 / 格式不符 / 重复 / 类型不对）
+
+   【为什么必须收口在一处】
+   断网时浏览器抛的是 TypeError: Failed to fetch，SDK 有时包一层、有时不包。
+   散落在各个 catch 里的判断只要漏掉一处，用户就会在界面上看到这串英文。
+   所以：网络的认法只写一处（isNetworkError），四个 describe* 全部调它。
+
+   【两条纪律】
+   1. 界面上的每一句都必须是中文 —— 英文原文只进 console（那里有完整日志可查）。
+   2. 兜底宁可说「操作失败，请重试」，也不要拼一段英文出去 ——
+      「看不懂的报错」比「说得笼统的报错」更伤：前者用户只能截图来问，
+      后者至少知道下一步该干什么。
+   ============================================================ */
+
+/** 浏览器 / SDK 在「连不上」时抛出的原文（一律是英文），统一在这里认 */
+const NET_ERROR_RE = /failed to fetch|load failed|network\s?error|networkerror|fetch failed|err_network|err_internet|err_connection|err_name_not_resolved|err_timed_out/i;
+
+/** 三类里「网络类」统一的一句话 —— 四个 describe* 共用，保证同一件事同一个说法 */
+const NET_ERROR_TEXT = "网络没连上——检查下网络，或者用发布地址重试。";
+
+/** 这个错误是不是「根本没连上」。传字符串或错误对象都行 */
+function isNetworkError(err) {
+  const s = typeof err === "string" ? err : String((err && err.message) || "");
+  return NET_ERROR_RE.test(s);
+}
+
+/** 兜底话术的取用规则：服务端已经翻成中文的照原样透传；
+    英文原文一律不往界面上送，换成调用方给的笼统中文。 */
+function userFacingFallback(raw, fallback) {
+  const s = String(raw || "").trim();
+  if (s && /[\u4e00-\u9fa5]/.test(s)) return s;
+  return fallback;
+}
+
 /** Postgres / 网关错误码 → 人话。模板见 cloud-service/database/code-generation.md 的错误表 */
 function describeError(error, what) {
   // 实测（Day 22）：网关会给数据库错误码加 DATABASE_ 前缀 —— RLS 拒绝报的是
   // "DATABASE_42501" 而不是 "42501"。不剥掉前缀，下面所有分支都命中不了，
   // 用户会看到 "new row violates row-level security policy" 这种英文原文。
   const code = String((error && error.code) || "").replace(/^DATABASE_/, "");
+  const raw = String((error && error.message) || "");
+
+  // ① 网络类：请求根本没到服务器，没有错误码可判，只能看原文
+  if (isNetworkError(raw)) return NET_ERROR_TEXT;
+
+  // ② 权限类：到了，但身份不够
   if (code === "42501" || code === "23502") {
     // 23502 = author_id 非空约束被拒，在发帖场景下等价于「没登录」
     return "这条操作没有被允许——如果是在发帖，请先登录再试。";
   }
+  // ③ 数据类：身份够，但数据本身不对
   if (code === "23514") return "内容不符合格式要求（标题或正文长度不对）。";
   if (code === "23505") return "这条已经存在了。";
   if (code === "42P01") return "数据表还没建好，请联系站方。";
@@ -99,7 +147,9 @@ function describeError(error, what) {
   if (code === "FX429") {
     return String((error && error.message) || "").trim() || "今天提交的次数到上限了，明天再来。";
   }
-  return (what || "操作") + "失败：" + (error.message || code || "未知错误");
+
+  // 兜底：绝不把英文原文拼进来（原文已在上面的 console.error 里留全）
+  return userFacingFallback(raw, (what || "操作") + "失败，请重试。");
 }
 
 /** 云存储错误 → 人话。存储的报错不带 SQL 码，只能看 status 与 code 两条线 */
@@ -108,16 +158,14 @@ function describeStorageError(error) {
   const msg = String((error && error.message) || "");
   const status = (error && error.status) || 0;
 
-  // 实测：未登录调存储会拿到 {code:"MISSING_CREDENTIALS", status:401}
+  // ② 权限类：未登录调存储会拿到 {code:"MISSING_CREDENTIALS", status:401}
   if (code === "MISSING_CREDENTIALS" || status === 401) return "上传头像需要先登录。";
-  // 本地开发地址跨域调云存储会被 CORS 拦（x-client-info 头不被允许），
-  // 发布后的网址是同源、不走 preflight —— 所以这里把话说清楚，别让人以为图片有问题
-  if (/failed to fetch|network ?error|load failed/i.test(msg)) {
-    return "上传没连上（网络不通，或本地开发地址被跨域拦了）。请在发布后的网址上重试。";
-  }
+  // ① 网络类：本地开发地址跨域调云存储会被 CORS 拦（x-client-info 头不被允许），
+  // 发布后的网址是同源、不走 preflight —— 认法与其它模块共用（Day 23 收口）
+  if (isNetworkError(msg)) return NET_ERROR_TEXT;
   if (status === 413 || /too large|exceed|maximum/i.test(msg)) return "图片太大了，换一张小一点的（2MB 以内）。";
   if (status === 422 || /mime|content-?type|not supported/i.test(msg)) return "只支持 JPG / PNG / WebP 三种图片。";
-  return "头像上传失败：" + (msg || code || "未知错误");
+  return userFacingFallback(msg, "头像上传失败，请重试。");
 }
 
 /* ---------------- 「这条不存在」的统一说法（Day 22 建 · Day 24 抽成函数） ----------------

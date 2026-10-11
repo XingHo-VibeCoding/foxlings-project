@@ -49,12 +49,15 @@ function maskEmail(email) {
   return s.slice(0, 1) + "***" + s.slice(at);
 }
 
-/** 把 SDK 的 error 翻成能看懂的话 */
+/** 把 SDK 的 error 翻成能看懂的话（三类口径见 js/api.js 顶部那段说明） */
 function authErrorText(error, fallback) {
   const kind = (error && error.kind) || "";
+  // ① 网络类：kind 有时不填，认原文更硬 —— 统一用 api.js 里那一句
+  if (kind === "network" || kind === "backend-unavailable" || isNetworkError(error)) return NET_ERROR_TEXT;
+  // ② 权限类：凭据不对
   if (kind === "unauthenticated" || kind === "invalid_grant") return "邮箱或密码不对，请重试。";
-  if (kind === "network" || kind === "backend-unavailable") return "网络不通，请稍后再试。";
-  return (error && error.message) || fallback || "操作失败，请重试。";
+  // 兜底：服务端已翻成中文的照用，英文原文不进界面
+  return userFacingFallback(error && error.message, fallback || "操作失败，请重试。");
 }
 
 const auth = {

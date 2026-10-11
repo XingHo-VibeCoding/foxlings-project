@@ -95,8 +95,11 @@ function describeAiError(e) {
 
   if (code.indexOf("auth_") === 0) {
     // 最常见的一种：本地 / 别的域名打开，Origin 对不上发布域名
+    // （比通用的网络文案更具体，所以排在它前面）
     return "这台设备连不上 AI 服务（来源校验没通过）。请用发布地址打开本站再试。";
   }
+  // ① 网络类：断网时 code 是空的，只能从原文认 —— 与 js/api.js 共用同一处判断与同一句话
+  if (isNetworkError(e && e.message)) return NET_ERROR_TEXT;
   if (code === "quota_rate_limited") return "刚问过一条，AI 那边在限流，过一会儿再试。";
   if (code.indexOf("quota_") === 0) return "AI 额度暂时用完了，稍后再试。";
   if (code.indexOf("request_") === 0) return "这条材料没被 AI 接受（可能过长或格式特殊），换个说法再试。";
@@ -104,7 +107,8 @@ function describeAiError(e) {
   if (code.indexOf("internal_") === 0) {
     return "服务出错了" + (rid ? "（编号 " + rid + "）" : "") + "，可以点重试。";
   }
-  return "AI 整理失败：" + ((e && e.message) || code || "未知错误");
+  // 兜底：绝不把英文原文拼进来（原文只在控制台）
+  return userFacingFallback(e && e.message, "AI 整理失败，请重试。");
 }
 
 /**
