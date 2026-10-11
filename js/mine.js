@@ -450,6 +450,9 @@ async function initProfile() {
 /* ---------------- ③ 我提交的待核查（写云库；未登录时本机留底） ---------------- */
 
 let MY_REPORTS = [];        // 登录时从云端取回的线索
+/* Day 25：读失败与「真的没有线索」必须在界面上分得开 ——
+   原来读挂了也被渲染成「还没有提交过线索。」，用户会以为自己的提交丢了。 */
+let REPORTS_STATE = "ok";   // ok | error
 
 /** 取线索：登录走云端；未登录时云端回读不到匿名线索，只读本机留底 */
 async function loadReports() {
@@ -487,6 +490,15 @@ function renderReports() {
   countEl.textContent = rows.length
     ? "共 " + rows.length + " 条（" + (signed ? "云端" : "仅本机") + "）"
     : "";
+
+  // Day 25：读失败 → 明说「没读出来」，别让它长得像「你没有提交过」
+  if (signed && REPORTS_STATE === "error") {
+    renderListState(box, "error", {
+      desc: "你在云端提交的线索没能读出来（不是没有提交过）。多半是网络或登录状态的问题。",
+      onRetry: () => { refreshReports(); },
+    });
+    return;
+  }
 
   if (!rows.length) {
     box.innerHTML = '<p class="mine-about">' +
@@ -574,8 +586,10 @@ function initReports() {
 async function refreshReports() {
   try {
     await loadReports();
+    REPORTS_STATE = "ok";
   } catch (err) {
     console.error("[mine] 线索读取失败：", err);
+    REPORTS_STATE = "error";   // 让 renderReports 渲染「没读出来」，而不是「你没有」
   }
   renderReports();
 }

@@ -6,13 +6,17 @@
    手工搜一次没有意义：下次没人记得该搜哪些词、该排除哪些文件。
    固化成一条命令，才能每次提交前都跑一遍，而且结果可复现。
 
-   【口径：两组模式，性质完全不同，绝不能混为一谈】
+   【口径：几组检查，性质完全不同，绝不能混为一谈】
      【红线】通用真密钥特征 —— 命中任何一条就是失败（退出码 1）。
              这些值的共同点是「拿到就能用」，所以绝不能进仓库。
+     【配置】.env / 证书 / 私钥类文件不能出现在仓库里，且忽略规则要真生效。
+             `.env.example` 是**刻意放行**的样板 —— 但只放行它，且它照样进红线扫描。
      【豁免】本平台 publishable key —— 设计上公开的标识符，只报告、不拦截。
              豁免不是「眼不见为净」，而是「写明理由 + 有实测支撑」：
              它旁边（js/cloud-config.js）就写着为什么它可以进源码，
              并且 2026-10-11 用裸通道实测过它没有任何写权限。
+     【样板】.env.example 里不许有真值（与 js/cloud-config.js 的线上值当场比对），
+             且必须被 .gitignore 用 `!.env.example` 放行 —— 否则它会被 .env.* 吃掉。
 
    【扫描范围】git 跟踪的文件（git ls-files）。
    为什么不用「递归读目录」：那会把 .git 内部对象、node_modules、
@@ -29,8 +33,9 @@ const path = require("path");
 const ROOT = __dirname;
 const SELF = path.basename(__filename);
 
-/** 只扫这些扩展名的文件（二进制 / 图片一律不看） */
-const TEXT_EXT = [".js", ".mjs", ".cjs", ".html", ".htm", ".css", ".md", ".sql", ".json", ".svg", ".txt", ".yml", ".yaml", ".toml", ".sh"];
+/** 只扫这些扩展名的文件（二进制 / 图片一律不看）
+    .env.example 也在这里 —— **样板必须被扫**：万一有人把真值粘进去，红线那一组要能抓到 */
+const TEXT_EXT = [".js", ".mjs", ".cjs", ".html", ".htm", ".css", ".md", ".sql", ".json", ".svg", ".txt", ".yml", ".yaml", ".toml", ".sh", ".example"];
 
 /* ---------------- 【红线】通用真密钥特征：命中即失败 ---------------- */
 const RED_LINES = [
@@ -148,8 +153,10 @@ function main() {
   console.log("");
 
   // ---- 第 2 组：配置类文件是否混进仓库 ----
+  // 注意 `.env.example` 是**刻意放行**的样板（只含占位符）—— 第 4 组单独检查它。
   console.log(c.b("【配置】.env / 证书 / 私钥类文件是否进了仓库或漏了忽略"));
-  const badFiles = all.filter((f) => /(^|\/)\.env|\.pem$|\.key$|(^|\/)id_rsa/i.test(f));
+  const isSample = (f) => /\.example$/i.test(f);
+  const badFiles = all.filter((f) => /(^|\/)\.env|\.pem$|\.key$|(^|\/)id_rsa/i.test(f) && !isSample(f));
   const ignoreRules = (() => {
     try {
       return fs.readFileSync(path.join(ROOT, ".gitignore"), "utf8");
@@ -180,9 +187,64 @@ function main() {
   }
   console.log("");
 
+  // ---- 第 4 组：.env.example 的合规性 ----
+  // 「样板不能含真实值」这句话如果只写在文档里，等于没写 —— 这里把它变成可执行的三条：
+  //   R1 文件存在（不然团队不知道要配哪些变量）
+  //   R2 里面没有**线上真值**（拿 js/cloud-config.js 的默认值当场比对）
+  //   R3 .gitignore 里有 !.env.example（否则会被上面的 .env.* 一起忽略，样板等于不存在）
+  console.log(c.b("【样板】.env.example（只放占位符 —— 真值出现在这里就等于进了仓库和 git 历史）"));
+  const sampleProblems = [];
+  const samplePath = path.join(ROOT, ".env.example");
+  const sampleText = fs.existsSync(samplePath) ? fs.readFileSync(samplePath, "utf8") : null;
+  const realValues = (() => {
+    let src = "";
+    try {
+      src = fs.readFileSync(path.join(ROOT, "js/cloud-config.js"), "utf8");
+    } catch {
+      return [];
+    }
+    const out = [];
+    const ep = /endpoint:\s*"([^"]+)"/.exec(src);
+    const pk = /publishableKey:\s*"([^"]+)"/.exec(src);
+    if (ep) out.push(["endpoint", ep[1]]);
+    if (pk) out.push(["publishableKey", pk[1]]);
+    return out;
+  })();
+
+  if (sampleText === null) {
+    sampleProblems.push("文件不存在（团队就不知道要配哪些变量）");
+  } else {
+    // R2：真值比对
+    realValues.forEach(([what, val]) => {
+      if (sampleText.includes(val)) sampleProblems.push(`含**线上真实值**（${what}）：真值不该出现在样板里`);
+    });
+    // R2 补：非空的值要「看得出是占位符」
+    sampleText.split(/\r?\n/).forEach((line, i) => {
+      const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (!m || !m[2]) return;
+      const val = m[2].replace(/^["']|["']$/g, "");
+      if (!/example|your|replace|xxx|\.\.\.|<.*>/i.test(val)) {
+        sampleProblems.push(`第 ${i + 1} 行 ${m[1]} 的值看不出是占位符：${val.slice(0, 40)}`);
+      }
+    });
+  }
+  // R3：放行规则
+  if (!/^\s*!\s*\.env\.example\s*$/m.test(ignoreRules)) {
+    sampleProblems.push(".gitignore 里缺 `!.env.example`（会被 .env.* 规则一起忽略，样板等于不存在）");
+  }
+
+  if (sampleProblems.length === 0) {
+    console.log("  结果：文件在 · " + c.ok("无线上真值") + " · 已在 .gitignore 放行  ✅");
+    console.log(c.dim(`  （比对了 ${realValues.length} 个线上真值；.env.example 本身仍在红线扫描范围内）`));
+  } else {
+    console.log("  结果：" + c.bad(sampleProblems.length + " 个问题") + "  ❌");
+    sampleProblems.forEach((p) => console.log(c.bad("    " + p)));
+  }
+  console.log("");
+
   if (unreadable.length) console.log(c.dim(`（有 ${unreadable.length} 个文件读不出文本，已跳过：${unreadable.slice(0, 3).join(", ")}）`));
 
-  const pass = redHits.length === 0 && badFiles.length === 0 && missing.length === 0;
+  const pass = redHits.length === 0 && badFiles.length === 0 && missing.length === 0 && sampleProblems.length === 0;
   console.log(c.b(pass ? c.ok("结论：PASS —— 红线 0 条，仓库里没有真密钥。") : c.bad("结论：FAIL —— 见上方红色条目，修掉再提交。")));
   process.exit(pass ? 0 : 1);
 }

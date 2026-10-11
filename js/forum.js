@@ -282,6 +282,9 @@ function composeSay(html, ok) {
 /** 提交前的前端校验：长度规则与数据库 CHECK 一致，早失败早提示（真正的把关仍在数据库） */
 function validateCompose(v) {
   if (!v.name) return "填一个称呼吧，会显示在帖子上。";
+  // Day 25 补：原来只判了非空，超过 20 字要一路撞到数据库 CHECK 才被拒 ——
+  // 那时用户拿到的是「长度或选项不在允许范围内」，不知道说的是哪一格。
+  if (v.name.length > 20) return "称呼太长了，20 个字以内（会显示在帖子上）。";
   if (v.title.length < 4) return "标题太短了，至少 4 个字，说清你要问什么。";
   if (v.title.length > 60) return "标题太长了，60 字以内。";
   if (v.body.length < 10) return "内容太短了，至少 10 个字：在哪看到的、原文怎么说的。";
@@ -424,7 +427,9 @@ async function initForumData() {
   renderForumView();
 }
 
-/** 重新拉一次帖子（发帖成功、登录状态变化后调用）。失败不打断当前界面。 */
+/** 重新拉一次帖子（发帖成功、登录状态变化后调用）。失败**不打断**当前界面，
+    但也不再一声不响 —— 用户刚点完「刷新」或刚发完帖，界面一点变化都没有时，
+    最容易被理解成「按钮坏了」，而不是「网络没连上」。 */
 async function refreshPosts() {
   try {
     // 资料也要重取：换了头像/昵称后，这里得跟着变
@@ -432,6 +437,12 @@ async function refreshPosts() {
     POST_STATE = "ok";
   } catch (err) {
     console.error("[forum] 帖子刷新失败：", err);
+    // 已经画好的列表保持不动（比清空成错误页友好），只在计数行上说明它可能不是最新的。
+    // 这一行本来就是 aria-live="polite" 的播报位，所以读屏用户也听得到，不用再加 role。
+    const el = document.getElementById("forum-summary");
+    if (el) {
+      el.textContent = "刷新失败（" + ((err && err.message) || "网络没连上") + "）——上面显示的可能不是最新的，过一会儿再点「刷新」。";
+    }
     return;
   }
   renderForumView();

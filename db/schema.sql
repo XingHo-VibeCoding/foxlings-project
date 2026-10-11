@@ -1,6 +1,9 @@
 -- ============================================================================
 -- schema.sql — 数据表结构 + RLS 闸门定稿
 --   Day 16 建档 · Day 21 修订为可重复执行 · Day 22 加软删除 · Day 24 撤软删除、加公告表与提交频控
+--   · 课·Day 23（2026-10-11）补两条**输入边界约束**：reports.url 长度上限、
+--     announcements.sort_order 区间 —— 边界要两端都在（前端早提示 + 数据库把关），
+--     由仓库根目录的 check-boundaries.js 逐条比对，见 docs/day23-secrets-and-errors.md。
 --
 -- 目标：**表结构先定下来，后面每个接口都在同一套字段上工作，不会每屏各造一套。**
 -- 字段命名与 api-contract.md 第一节**完全一致**，接口层不做改名/映射。
@@ -208,6 +211,20 @@ COMMENT ON COLUMN reports.submitter_ip IS '提交来源的客户端 IP（取网�
 CREATE INDEX IF NOT EXISTS idx_reports_queue ON reports (status, created_at);
 CREATE INDEX IF NOT EXISTS idx_reports_submitter_day ON reports (submitter_ip, created_at);
 
+-- 边界约束（2026-10-11 补）：url 是**匿名可写**字段 —— 未登录访客能直接 POST 这一列。
+-- 不设上限，等于在站方的待审队列上留一个「塞进任意长字符串」的口子。
+-- 写法说明：用「先查 pg_constraint 再建」的 DO 块，而不是内联 CHECK ——
+-- 内联形式对**已存在**的表是空操作，这个写法在「全新重建」与「已上线的库」两种情况下
+-- 都收敛到同一个结果（幂等），与文件头部那条契约一致。
+DO $d$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+     WHERE t.relname = 'reports' AND c.conname = 'reports_url_len'
+  ) THEN
+    ALTER TABLE reports ADD CONSTRAINT reports_url_len CHECK (url IS NULL OR char_length(url) <= 500);
+  END IF;
+END $d$;
+
 -- ---------------------------------------------------------------------------
 -- ③-b 提交频控 —— enforce_report_rate_limit（Day 24 新增）
 --   规则：**任何人（无论登录与否）每天最多 5 条线索**，超了当天不再收。
@@ -355,7 +372,19 @@ CREATE TABLE IF NOT EXISTS announcements (
 );
 
 COMMENT ON TABLE announcements IS '站方公告：论坛顶部置顶公共栏的数据源；公开可读，只有 admins 名单里的人能发/改/删';
-COMMENT ON COLUMN announcements.sort_order IS '排序权重，大的在前；同权重时新的在前';
+COMMENT ON COLUMN announcements.sort_order IS '排序权重（-9999 ~ 9999 的整数），大的在前；同权重时新的在前';
+
+-- 边界约束（2026-10-11 补）：sort_order 收进 int2 量级之外的一个明确区间。
+-- 原本只有列类型兜底（int4），于是「权重 100000」这种手滑会被安静接受、把公告顶到不该在的位置；
+-- 前端加了 min/max 与明确拒绝，这里补上数据库这端 —— 两边同一个区间，边界才算真的存在。
+DO $d$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+     WHERE t.relname = 'announcements' AND c.conname = 'announcements_sort_order_range'
+  ) THEN
+    ALTER TABLE announcements ADD CONSTRAINT announcements_sort_order_range CHECK (sort_order BETWEEN -9999 AND 9999);
+  END IF;
+END $d$;
 
 -- ---------------------------------------------------------------------------
 -- ⑥ RLS 闸门 —— 六张表 17 条策略（Day 21 定稿 · Day 22 增 profiles · Day 23 增 admins 与管理策略 · Day 24 增公告、撤回收站读）

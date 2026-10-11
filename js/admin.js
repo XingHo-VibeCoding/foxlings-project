@@ -63,11 +63,23 @@ async function renderGate() {
 
 /* ---------------- 数据装载 ---------------- */
 
+/** 读失败的条目暂存到这里，等四块都读完了统一报一次（见 loadAll 末尾）
+    Day 25 安全审计发现的问题：这里原来是**纯静默**的 —— 读挂了也返回 []，
+    列表看起来和「库里本来就空的」一模一样。管理员会据此以为数据丢了，
+    然后去做一些没必要甚至有害的操作（重灌、删表）。「空」和「读不出来」必须分开说。 */
+let LOAD_FAILURES = [];
+
 async function loadAll() {
   // 每块各自兜底：一块读不到不该拖垮另外几块（比如会话恰好过期的那一瞬间）
+  LOAD_FAILURES = [];
   const safe = async (label, fn, fallback) => {
     try { return await fn(); }
-    catch (err) { console.error("[admin] " + label + "失败：", err); return fallback; }
+    catch (err) {
+      console.error("[admin] " + label + "失败：", err);
+      // 接口层已经把错翻成中文了，这里直接留用人话；没有 message 才回落到通用一句
+      LOAD_FAILURES.push(label + "：" + ((err && err.message) || "原因不明"));
+      return fallback;
+    }
   };
 
   ALL_POSTS = await safe("帖子读取", () => api.listAllPosts(), []);
@@ -83,6 +95,34 @@ async function loadAll() {
   renderItems();
   renderReports();
   renderAnnouncements();
+  renderLoadWarning();
+}
+
+/** 把「有几块没读出来」明写在后台顶上 —— 常驻（不是 7 秒就走的那种回执），
+    因为「列表可能不完整」这件事会一直影响判读，直到下次刷新成功为止。
+    失败是暂时的（网络/会话），所以它也会在下次 loadAll 成功时自己消失。 */
+function renderLoadWarning() {
+  const body = document.getElementById("admin-body");
+  if (!body) return;
+  const id = "admin-load-warn";
+  let el = document.getElementById(id);
+
+  if (!LOAD_FAILURES.length) {
+    if (el) el.remove();
+    return;
+  }
+
+  if (!el) {
+    el = document.createElement("p");
+    el.id = id;
+    el.className = "admin-flash note-warn";
+    el.setAttribute("role", "alert");
+    body.insertBefore(el, body.firstChild);
+  }
+  el.innerHTML =
+    "<b>有 " + LOAD_FAILURES.length + " 项没能读出来</b>——下面的列表<b>可能不完整</b>，" +
+    "不要当成「数据没了」。" + escHtml(LOAD_FAILURES.join("；")) +
+    "（多半是网络或登录状态的问题，刷新页面重进一次通常就好。）";
 }
 
 /* ---------------- 操作回执 ---------------- */
@@ -454,12 +494,19 @@ async function submitAnnForm(e) {
 
   const title = f.title.value.trim();
   const body = f.body.value.trim();
-  const sortOrder = Number(f.order.value) || 0;
+  // 排序权重：**不静默兜底成 0** —— 输错了就说输错了。
+  // （原来是 `Number(v) || 0`，把 "abc" / Infinity 这类输入安静地变成 0，
+  //   结果公告被放到一个谁也没选过的位置，而且没有任何信号。）
+  const rawOrder = String(f.order.value).trim();
+  const sortOrder = rawOrder === "" ? 0 : Number(rawOrder);
   const isPinned = f.pinned.checked;
 
   // 前端先照数据库的 CHECK 校验一遍，图个早提示（真正的把关仍在数据库）
   if (title.length < 2 || title.length > 60) { annSay("标题要在 2–60 字之间。", false); return; }
   if (body.length < 1 || body.length > 2000) { annSay("正文要在 1–2000 字之间。", false); return; }
+  if (!Number.isInteger(sortOrder) || sortOrder < -9999 || sortOrder > 9999) {
+    annSay("排序权重要是 -9999 ~ 9999 之间的整数（大的排在前面）。", false); return;
+  }
 
   const btn = f.submit;
   const idle = btn.textContent;

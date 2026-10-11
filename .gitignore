@@ -1,9 +1,16 @@
 # ===== 密钥与配置：永不上传 =====
 .env
 .env.*
+# …但**样板**必须进仓库：它只含占位符，是团队知道「要配哪些变量」的唯一入口。
+# 下面两行从上面的 .env.* 规则里把它放行（.env.example 若被忽略，文档就失去落点）。
+!.env.example
+!.env.*.example
 *.pem
 *.key
 id_rsa*
+
+# 本地环境覆盖文件：由 `node env-to-js.js` 从 .env 生成，可能含真实值 → 永不进仓库
+js/env.local.js
 
 # ===== 依赖目录（有 package.json 就能随时重装）=====
 node_modules/

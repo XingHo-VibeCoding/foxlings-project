@@ -309,7 +309,9 @@ async function initDetail() {
     // 状态二：错误（附「下一步怎么做」的指引，不让用户干瞪眼）
     console.error("[detail] 数据加载失败：", err);
     renderListState(head, "error", {
-      desc: "这条核查档案没能读出来，可能是网络抖动或 data.json 缺失。",
+      // Day 25：原文案写的是「data.json 缺失」—— 那是 Day 20 之前的数据源，
+      // 现在读的是云数据库，照着旧文案去排错只会把人带偏。
+      desc: "这条核查档案没能读出来，可能是网络不通，或数据服务暂时不可用。",
       onRetry: initDetail,
     });
     return;

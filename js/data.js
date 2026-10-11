@@ -80,7 +80,7 @@ function renderListState(container, state, opts) {
   } else if (state === "error") {
     box.innerHTML =
       '<strong class="state-title">数据加载失败</strong>' +
-      '<span class="state-desc">' + (opts.desc || "可能是网络抖动，或 data.json 没能读到。") + "</span>" +
+      '<span class="state-desc">' + (opts.desc || "可能是网络不通，或数据服务暂时不可用——过一会儿点「重试」。") + "</span>" +
       '<button type="button" class="empty-jump" data-state-act="retry">重试</button>';
   } else {
     let extra = "";
@@ -193,3 +193,75 @@ function escHtml(s) {
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
   ));
 }
+
+/* ============================================================
+   Day 25（安全审计补）：未捕获异常的兜底 —— 最后一道网
+
+   【为什么需要它】
+   项目里所有「预期会失败」的地方都有 try/catch，报错也都翻成了中文。
+   但还有一类：**没人预料到会抛的** —— 某个回调里漏了一个 await、
+   某个 SDK 在升级后改了返回形状、某个第三方脚本抛了错。
+   这类异常不会走任何 catch，结果就是：点了没反应，控制台里一条红字，
+   用户完全不知道发生了什么（这类「静默失败」是最难查的 bug）。
+
+   【它做什么】
+   控制台照旧留全部原文（排查用），页面上补一条能看见的中文横幅：
+   说清「不是你操作错了」+「刷新可恢复」，并带一个刷新按钮。
+   **不弹 alert**（打断且丑），**不吞异常**（原文照样进控制台）。
+
+   【为什么放在 data.js】
+   它是四个页面（index / detail / mine / admin）都加载的公共层，
+   和 escHtml、renderListState 一样属于「全站共用」。放这儿不用改四个 html。
+   ⚠️ 已知边界：脚本加载顺序上 data.js 排在 api.js 之后，
+      所以「api.js 自身在解析期就抛错」这种情况它兜不住（那种错页面本来也起不来）。 */
+const CRASH_BANNER_ID = "fx-crash-banner";
+
+/** 挂一条横幅；已经挂过就只更新文案（连环报错不会堆出一排横幅）
+
+    这里刻意用 createElement 逐节点搭，而不是 innerHTML + 再取 id：
+    页面里本来没有这条横幅，它只在这条路径上被造出来 ——
+    写 innerHTML 的话就得多一次按 id 回捞（frontend-rules 的 H2 会把它当成
+    「脚本引用了一个页面里不存在的 id」）。节点引用直接握在手里最省事。 */
+function mountCrashBanner(text) {
+  if (typeof document === "undefined") return;
+  let el = document.getElementById(CRASH_BANNER_ID);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = CRASH_BANNER_ID;
+    el.className = "fx-crash-banner";
+    el.setAttribute("role", "alert");
+
+    const span = document.createElement("span");
+    span.className = "fx-crash-text";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "empty-jump";
+    btn.textContent = "刷新页面";
+    btn.addEventListener("click", () => location.reload());
+
+    el.appendChild(span);
+    el.appendChild(btn);
+    (document.body || document.documentElement).appendChild(el);
+  }
+  // 第 2 次起只换文案（按钮是同一个，监听器不重复挂）
+  const textEl = el.querySelector(".fx-crash-text");
+  if (textEl) textEl.textContent = text;
+}
+
+/** 未处理的 Promise 拒绝（最常见的漏网形态：忘了 await 的 async 调用） */
+window.addEventListener("unhandledrejection", (ev) => {
+  const reason = ev && ev.reason;
+  console.error("[fx] 未处理的异步错误：", reason);
+  // 已经翻成中文的（比如接口层抛出来的）就照原话显示，英文原文不往界面上送
+  const msg = reason && /[\u4e00-\u9fa5]/.test(String(reason.message || ""))
+    ? String(reason.message)
+    : "页面遇到一个没预料到的问题，刚才这一步可能没成功。刷新页面可以恢复正常。";
+  mountCrashBanner(msg);
+});
+
+/** 未捕获的同步异常（脚本错误；资源加载失败不会走到这里） */
+window.addEventListener("error", (ev) => {
+  console.error("[fx] 未捕获的错误：", ev && (ev.error || ev.message));
+  mountCrashBanner("页面遇到一个没预料到的问题，刚才这一步可能没成功。刷新页面可以恢复正常。");
+});

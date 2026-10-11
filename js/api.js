@@ -1,6 +1,7 @@
 /* ============================================================
    api.js — 数据接口层
-     （Day 20 接读接口 · Day 21 接写接口 · Day 22 补改/删防呆 · Day 24 撤软删除、加站方公告）
+     （Day 20 接读接口 · Day 21 接写接口 · Day 22 补改/删防呆 · Day 24 撤软删除、加站方公告
+      · Day 25 安全审计：三类错误归属判定 + 入口输入自检 + 配置缺失的中文提示）
 
    【它在整个作品里的位置】
      页面脚本（home.js / detail.js / search.js / mine.js / forum.js）
@@ -54,6 +55,13 @@ let __cloudClient = null;
 /** 取得（并复用）云服务客户端 —— 整个应用只初始化一次 */
 function getCloudClient() {
   if (__cloudClient) return __cloudClient;
+  // 配置没加载上（js/cloud-config.js 没引、或 window.__ENV__ 写坏了）时，
+  // 原来会在这里抛 `TypeError: Cannot read properties of undefined (reading 'endpoint')`
+  // —— 一句英文技术栈甩到界面上。先自己认出来，换成能照着做的一句话。
+  const cfg = typeof window !== "undefined" ? window.CLOUD_CONFIG : null;
+  if (!cfg || !cfg.endpoint) {
+    throw new Error("页面配置没加载上来（js/cloud-config.js）——刷新页面重试；还是不行请告诉站方。");
+  }
   const S = window.WorkBuddyCloud;
   if (!S || typeof S.createWorkBuddyCloud !== "function") {
     throw new Error("云服务 SDK 未加载（CDN 脚本没读到，或网络不通）");
@@ -98,11 +106,53 @@ function unwrap(result, what) {
       后者至少知道下一步该干什么。
    ============================================================ */
 
+/* ---------------- 三类错误的「归属判定」（Day 25 立） ----------------
+
+   上面那段按「错在哪一段路」把错误分成网络 / 权限 / 数据三类。
+   Day 25 的安全审计又要求按「**谁该动手**」再收一次口 —— 这两套并不冲突，
+   它们是同一批错误的两副面孔：
+
+     用户输入错（input）   用户自己改一下就能过 → 告诉他改什么
+        · 前端自检没过（api.js 的 assertText / 输入框校验）
+        · 数据类：23514 格式不符 / 23505 重复 / FX429 今日超限 / NOT_FOUND 这条已不在
+        · 权限类里「先登录再试」「账号没有管理权限」—— 也是用户能动手解决的
+     网络/接口错（network） 请求没到服务器 → 稍后再试
+        · 断网、被跨域拦、SDK 没加载（浏览器抛的是 TypeError: Failed to fetch 这类英文）
+     服务端错（server）     到了服务器，但坏在它那边 → 记录日志 + 通用提示
+        · 网关 5xx、gateway_/internal_ 前缀的码、42P01（表不存在）、以及**认不出来的码**
+
+   「认不出来的一律算服务端错」是刻意的：猜错方向会让用户白改半天输入，
+   而一句「稍后再试」不会害人。日志里（unwrap 的 console.error）永远留着原文可查。 */
+const ERROR_KIND = { INPUT: "input", NETWORK: "network", SERVER: "server" };
+
+/** 错误 → 三类之一。传 {code, message, status} 这类对象；纯字符串只按网络特征判 */
+function classifyError(error) {
+  const code = String((error && error.code) || "").replace(/^DATABASE_/, "");
+  const raw = typeof error === "string" ? error : String((error && error.message) || "");
+  const status = Number((error && (error.status || error.statusCode)) || 0);
+
+  if (isNetworkError(raw)) return ERROR_KIND.NETWORK;
+  if (status >= 500) return ERROR_KIND.SERVER;
+
+  if (code === "INPUT_INVALID") return ERROR_KIND.INPUT;   // assertText 主动抛的
+  if (code === "NOT_FOUND") return ERROR_KIND.INPUT;       // 这条已经被删了 / 没权限
+  if (code === "FORBIDDEN") return ERROR_KIND.INPUT;       // 账号没有管理权限
+  if (code === "23514" || code === "23505" || code === "FX429") return ERROR_KIND.INPUT;
+  if (code === "42501" || code === "23502") return ERROR_KIND.INPUT;
+
+  if (code === "42P01") return ERROR_KIND.SERVER;
+  if (/^(gateway_|internal_|upstream_|timeout_)/i.test(code)) return ERROR_KIND.SERVER;
+  return ERROR_KIND.SERVER;
+}
+
 /** 浏览器 / SDK 在「连不上」时抛出的原文（一律是英文），统一在这里认 */
 const NET_ERROR_RE = /failed to fetch|load failed|network\s?error|networkerror|fetch failed|err_network|err_internet|err_connection|err_name_not_resolved|err_timed_out/i;
 
 /** 三类里「网络类」统一的一句话 —— 四个 describe* 共用，保证同一件事同一个说法 */
 const NET_ERROR_TEXT = "网络没连上——检查下网络，或者用发布地址重试。";
+
+/** 「服务端错」的统一话术：用户改不了，所以只说「不是你的问题 + 下一步」 */
+const SERVER_ERROR_TEXT = "服务端暂时出了点问题（不是你填的内容有问题）。稍等一下再试；一直不行就告诉站方。";
 
 /** 这个错误是不是「根本没连上」。传字符串或错误对象都行 */
 function isNetworkError(err) {
@@ -118,6 +168,17 @@ function userFacingFallback(raw, fallback) {
   return fallback;
 }
 
+/** 服务端错在控制台留一条好搜的日志 —— 「记录日志 + 通用提示」里的那一半。
+
+    为什么打成一行字符串而不是直接 console.error(对象)：这样 grep 一下
+    `[server-error]` 就能把「用户改不了的那一类」全捞出来；
+    对象照旧单独打一份，排查时字段都在。 */
+function logServerError(error, what) {
+  const code = String((error && error.code) || "(无码)");
+  console.warn("[api][server-error] " + (what || "操作") + " · code=" + code);
+  console.error("[api][server-error] 原文：", error);
+}
+
 /** Postgres / 网关错误码 → 人话。模板见 cloud-service/database/code-generation.md 的错误表 */
 function describeError(error, what) {
   // 实测（Day 22）：网关会给数据库错误码加 DATABASE_ 前缀 —— RLS 拒绝报的是
@@ -125,32 +186,80 @@ function describeError(error, what) {
   // 用户会看到 "new row violates row-level security policy" 这种英文原文。
   const code = String((error && error.code) || "").replace(/^DATABASE_/, "");
   const raw = String((error && error.message) || "");
+  const kind = classifyError(error);
 
-  // ① 网络类：请求根本没到服务器，没有错误码可判，只能看原文
-  if (isNetworkError(raw)) return NET_ERROR_TEXT;
+  /* ① 网络 / 接口错 —— 请求根本没到服务器，没有错误码可判，只能看原文 */
+  if (kind === ERROR_KIND.NETWORK) return NET_ERROR_TEXT;
 
-  // ② 权限类：到了，但身份不够
-  if (code === "42501" || code === "23502") {
-    // 23502 = author_id 非空约束被拒，在发帖场景下等价于「没登录」
-    return "这条操作没有被允许——如果是在发帖，请先登录再试。";
+  /* ② 用户输入错 —— 每一句都要能回答「那我改哪里」 */
+  if (kind === ERROR_KIND.INPUT) {
+    // 42501 = RLS 拒绝；23502 = author_id 非空约束被拒（发帖场景下等价于「没登录」）
+    if (code === "42501" || code === "23502") {
+      return "这条操作没有被允许——如果是在发帖，请先登录再试。";
+    }
+    if (code === "23514") return "内容不符合格式要求（长度或选项不在允许范围内）——改一下再提交。";
+    if (code === "23505") return "这条已经存在了，不用再提交一次。";
+    // 提交频控（Day 24）：数据库的 BEFORE INSERT 触发器拦下的超限提交。
+    // 实测（真实通道，见 verify/probe-day24-ratelimit.js）：网关把这个自定义 SQLSTATE
+    // 带上 DATABASE_ 前缀原样透传 —— code="DATABASE_FX429"，上面已经剥掉了前缀；
+    // message 就是给用户看的那句中文，而且**由服务端按当前阈值拼出来**
+    // （「已经到 N 条上限了（每天最多 N 条）」）→ 前端不重复写这个数字，
+    // 以后改阈值只改数据库里那一个常量，这里不用跟着动。
+    if (code === "FX429") {
+      return String((error && error.message) || "").trim() || "今天提交的次数到上限了，明天再来。";
+    }
+    // NOT_FOUND / FORBIDDEN / 前端自检：抛出来的本来就是给用户看的中文
+    const mine = userFacingFallback(raw, "");
+    if (mine) return mine;
+    return (what || "操作") + "失败，请检查一下填的内容再试。";
   }
-  // ③ 数据类：身份够，但数据本身不对
-  if (code === "23514") return "内容不符合格式要求（标题或正文长度不对）。";
-  if (code === "23505") return "这条已经存在了。";
+
+  /* ③ 服务端错 —— 用户改不了，所以：日志留全，话只说通用的 */
   if (code === "42P01") return "数据表还没建好，请联系站方。";
-  // 提交频控（Day 24）：数据库的 BEFORE INSERT 触发器拦下的超限提交。
-  // 实测（真实通道，见 verify/probe-day24-ratelimit.js）：网关把这个自定义 SQLSTATE
-  // 带上 DATABASE_ 前缀原样透传 —— code="DATABASE_FX429"，上面已经剥掉了前缀；
-  // message 就是给用户看的那句中文，而且**由服务端按当前阈值拼出来**
-  // （「已经到 N 条上限了（每天最多 N 条）」）→ 前端不重复写这个数字，
-  // 以后改阈值只改数据库里那一个常量，这里不用跟着动。
-  if (code === "FX429") {
-    return String((error && error.message) || "").trim() || "今天提交的次数到上限了，明天再来。";
-  }
-
-  // 兜底：绝不把英文原文拼进来（原文已在上面的 console.error 里留全）
-  return userFacingFallback(raw, (what || "操作") + "失败，请重试。");
+  const server = userFacingFallback(raw, "");   // 服务端已经翻好的中文优先透传
+  if (server) return server;
+  logServerError(error, what);
+  return SERVER_ERROR_TEXT;
 }
+
+/* ---------------- 入口处的输入自检（Day 25 补 · 审计发现的缺口） ----------------
+
+   为什么接口层还要再检一遍：页面上的校验只保护「页面自己那条路」。
+   哪天多一个调用方（脚本、新页面、复制粘贴出来的一段代码），
+   就会绕过所有前端校验直接撞数据库 CHECK —— 用户拿到的是 23514 的泛化提示
+   （「长度或选项不在允许范围内」），不知道到底该改哪一处。
+
+   这一层不是安全闸门（闸门是数据库的 CHECK 与 RLS，前端永远只是早提示），
+   它管的是**说人话**：把「哪儿不对、改成什么」在请求发出去之前就讲清楚。 */
+
+/** 造一个「用户输入错」，带上分类标记供 describeError 认 */
+function inputError(message) {
+  const e = new Error(message);
+  e.code = "INPUT_INVALID";
+  e.kind = ERROR_KIND.INPUT;
+  return e;
+}
+
+/**
+ * 文本字段的长度自检。与数据库 CHECK 同口径（数字集中在下面两处调用点），
+ * 通过则返回**去掉首尾空白**的值 —— 调用方直接拿它当正文，避免库里存进一堆空格。
+ */
+function assertText(value, label, min, max) {
+  const v = String(value == null ? "" : value).trim();
+  if (!v) throw inputError("还差「" + label + "」——填一下再提交。");
+  if (v.length < min) throw inputError(label + "太短了，至少 " + min + " 个字。");
+  if (v.length > max) throw inputError(label + "太长了，" + max + " 个字以内。");
+  return v;
+}
+
+/** 整数字段的自检。**不静默兜底成 0** —— 输错了就说输错了（Day 24 的决定，这里保持一致） */
+function assertInt(value, label, min, max) {
+  const n = Number(value);
+  if (!Number.isInteger(n)) throw inputError(label + "要填整数（现在填的是「" + String(value) + "」）。");
+  if (n < min || n > max) throw inputError(label + "要在 " + min + " ~ " + max + " 之间。");
+  return n;
+}
+
 
 /** 云存储错误 → 人话。存储的报错不带 SQL 码，只能看 status 与 code 两条线 */
 function describeStorageError(error) {
@@ -182,6 +291,7 @@ function notFoundError(label, id) {
     "如果它本该还在，请确认你的账号有没有相应权限。"
   );
   e.code = "NOT_FOUND";
+  e.kind = ERROR_KIND.INPUT;   // 用户能动手的部分：刷新看看 / 换有权限的账号
   return e;
 }
 
@@ -253,11 +363,14 @@ const api = {
    * 返回新建的那一行（含数据库生成的 id）。
    */
   async createPost({ category, title, body, authorName, itemId }) {
+    // 输入自检：口径与数据库 CHECK 一致（title 4–60 / body 10–1000 / author_name 1–20）。
+    // 页面已经拦过一道，这里再拦是为了「别的调用方」——见本文件 assertText 的注释。
+    if (!category) throw inputError("还差「分类」——选一个再提交。");
     const row = {};
     row.category = category;
-    row.title = title;
-    row.body = body;
-    row.author_name = authorName;
+    row.title = assertText(title, "标题", 4, 60);
+    row.body = assertText(body, "内容", 10, 1000);
+    row.author_name = assertText(authorName, "称呼", 1, 20);
     if (itemId) row.item_id = itemId;   // 关联核查是可选的，没有就不传这一列
 
     const data = unwrap(
@@ -279,8 +392,13 @@ const api = {
    * 提交后由页面重新拉列表即可，不需要这次插入的回执。
    */
   async submitReport({ text, url }) {
-    const row = { text };
-    if (url) row.url = url;
+    // 输入自检：text 5–500（数据库 CHECK 同口径）；url 是可选的，最长 500
+    const row = { text: assertText(text, "线索内容", 5, 500) };
+    if (url) {
+      const u = String(url).trim();
+      if (u.length > 500) throw inputError("链接太长了（500 个字符以内）——只贴到域名后第一层路径就够。");
+      row.url = u;
+    }
 
     const { error } = await getCloudClient().database.from("reports").insert(row);
     if (error) {
@@ -343,9 +461,16 @@ const api = {
    * 会被主键挡住而不是写坏数据。
    */
   async saveProfile({ userId, nickname, bio, avatarKind, avatarValue, hasExisting }) {
+    // 输入自检：nickname 1–20 / bio ≤80（数据库 CHECK 同口径）
+    const safeBio = String(bio == null ? "" : bio).trim();
+    if (safeBio.length > 80) throw inputError("签名太长了，80 个字以内。");
+    if (avatarKind && ["preset", "upload"].indexOf(avatarKind) === -1) {
+      throw inputError("头像类型不对（只能是预设或上传的图）。");
+    }
+
     const row = {
-      nickname: nickname,
-      bio: bio || "",
+      nickname: assertText(nickname, "昵称", 1, 20),
+      bio: safeBio,
       avatar_kind: avatarKind || "preset",
       avatar_value: avatarValue || null,
       updated_at: new Date().toISOString(),
@@ -623,10 +748,11 @@ const api = {
 
   /** 发布一条公告。author_id 由服务端 auth.uid() 填，客户端不传 */
   async createAnnouncement({ title, body, sortOrder, isPinned }) {
+    // 输入自检：title 2–60 / body 1–2000 / sort_order -9999~9999（数据库 CHECK 同口径）
     const row = {
-      title: title,
-      body: body,
-      sort_order: Number(sortOrder) || 0,
+      title: assertText(title, "公告标题", 2, 60),
+      body: assertText(body, "公告正文", 1, 2000),
+      sort_order: assertInt(sortOrder == null || sortOrder === "" ? 0 : sortOrder, "排序权重", -9999, 9999),
       is_pinned: isPinned !== false,
       updated_at: new Date().toISOString(),
     };
@@ -648,9 +774,9 @@ const api = {
     if (!id) throw new Error("缺少公告 id，没法修改。");
 
     const patch = { updated_at: new Date().toISOString() };
-    if (title !== undefined) patch.title = title;
-    if (body !== undefined) patch.body = body;
-    if (sortOrder !== undefined) patch.sort_order = Number(sortOrder) || 0;
+    if (title !== undefined) patch.title = assertText(title, "公告标题", 2, 60);
+    if (body !== undefined) patch.body = assertText(body, "公告正文", 1, 2000);
+    if (sortOrder !== undefined) patch.sort_order = assertInt(sortOrder, "排序权重", -9999, 9999);
     if (isPinned !== undefined) patch.is_pinned = !!isPinned;
 
     const data = unwrap(
@@ -675,3 +801,27 @@ const api = {
     return gone;
   },
 };
+
+/* ============================================================
+   Day 25：把错误口径挂到 window 上，好让自检脚本直接跑单测
+
+   为什么允许（而不是「藏起来才算内部实现」）：
+   这几个函数是**纯函数** —— 给一个错误对象，返回一句中文。
+   把它们挂出来，`verify/test-day25-errors.js` 就能在不起服务器、
+   不连数据库的情况下，把三类错误逐条跑一遍（含负例）。
+   没有这一步，「错误提示统一」就只能靠人肉点页面看，无法复跑、无法回归。
+
+   注意：挂出去的只是**翻译函数**，不是客户端、不是凭据 ——
+   真正的闸门仍在数据库 RLS 与函数签名里。 */
+if (typeof window !== "undefined") {
+  window.FX_ERRORS = {
+    ERROR_KIND: ERROR_KIND,
+    classifyError: classifyError,
+    describeError: describeError,
+    isNetworkError: isNetworkError,
+    userFacingFallback: userFacingFallback,
+    assertText: assertText,
+    assertInt: assertInt,
+    inputError: inputError,
+  };
+}

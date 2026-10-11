@@ -37,7 +37,16 @@
 2. commit 信息格式：`Day X｜一句话说明`。
 3. 密钥、`.env`、数据库连接串永远不进代码、不进提交。
    → 提交前跑一次 `node check-secrets.js`：扫全仓的密钥特征词，红线命中 0 条才算过。
-     （唯一豁免的是 `js/cloud-config.js` 里的 publishableKey —— 它是公开标识、已实测无权限，脚本会单列出来说明。）
+     （唯一豁免的是 `js/cloud-config.js` 里的 publishableKey —— 它是公开标识、已实测无权限，脚本会单列出来说明。
+       同一条命令还会检查 `.env.example` 里没混进真值、且被 `.gitignore` 用 `!.env.example` 正确放行。）
+   → 真实值只写 `.env`（已忽略）；要把它注入页面就跑 `node env-to-js.js` 生成 `js/env.local.js`（也已忽略）。
+   → 动了任何长度 / 区间 / 枚举，再跑一次 `node check-boundaries.js`：数据库 CHECK 与前端 JS、输入框 maxlength
+     逐条比对，对不上就失败（这条挡的是「改了数据库忘了改前端」那种**没有信号**的坏）。
+     现在同一条命令还比对**接口层自检**（`js/api.js` 的 `assertText` / `assertInt`）—— 三道腿数字要一致。
+   → 动了错误提示相关代码（`describeError` / `classifyError` / 各页面的 catch），
+     跑 `verify/test-day25-errors.js`（在**工作区**，不进仓库）：把 `js/api.js` 丢进 Node 沙箱跑 82 条断言，
+     其中硬约束是「返回给用户的话里不允许出现英文句子」。这条挡的是「某类错误又漏回英文兜底」。
+   → 自查清单与判据见 `docs/security-audit.md`（每项都写了「怎么算通过」）。
 4. 一天的任务全部做完、我核对完文件清单之后才提交，中途不要边做边提交。
 
 ## 六、当日收尾

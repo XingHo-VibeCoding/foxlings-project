@@ -286,15 +286,23 @@ function startAiCooldownTick() {
 async function submitAiAsReport() {
   const note = document.getElementById("ai-rep-note");
   const btn = document.getElementById("ai-report");
-  const text = aiLastInput.slice(0, 500);   // reports.text 的库约束是 5–500 字
+  const full = aiLastInput;
+  const text = full.slice(0, 500);   // reports.text 的库约束是 5–500 字
 
   if (btn) btn.disabled = true;
   if (note) note.textContent = " 提交中…";
   try {
     await api.submitReport({ text });
-    if (note) note.textContent = " 已提交，站方会逐条核查。";
+    // Day 25：截断不许再无声无息 —— 用户粘贴了一整篇、以为把全文交上来了，
+    // 实际只交了前 500 字，界面却只说「已提交」。现在把这件事说明白。
+    const cut = full.length > text.length ? "（材料较长，只提交了前 500 字）" : "";
+    if (note) note.textContent = " 已提交，站方会逐条核查。" + cut;
   } catch (e) {
-    if (note) note.textContent = " 提交失败：" + (e.message || "稍后再试。");
+    // 与全站同一口径：接口层已翻成中文的照原样用，英文原文一律不往界面上送
+    const msg = window.FX_ERRORS
+      ? window.FX_ERRORS.userFacingFallback(e && e.message, "提交失败，稍后再试。")
+      : ((e && e.message) || "提交失败，稍后再试。");
+    if (note) note.textContent = " 提交失败：" + msg;
     if (btn) btn.disabled = false;
   }
 }

@@ -97,7 +97,8 @@
               <input type="checkbox" id="ann-pinned" checked> 立即公布（不勾 = 先存稿，前台看不到）
             </label>
             <label class="ann-order">
-              排序权重 <input type="number" id="ann-order" class="ann-order-input" value="0" step="10">
+              排序权重 <input type="number" id="ann-order" class="ann-order-input" value="0" step="10"
+                             min="-9999" max="9999">
             </label>
             <button type="submit" class="empty-jump" id="ann-submit">发布公告</button>
             <button type="button" class="admin-btn-ghost" id="ann-cancel" hidden>取消编辑</button>
