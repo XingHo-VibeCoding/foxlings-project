@@ -187,6 +187,41 @@ function readJSON(key, fallback) {
   } catch (e) { return fallback; }
 }
 
+/* ============================================================
+   Day 24 修复：本地存储的**元素级**校验（readJSON 只管到「能 parse」）
+
+   【Bug】readJSON 的注释写着「坏了都退回默认值（不让页面挂掉）」，
+   但它只兜住了 JSON.parse 失败这一层。「JSON 能 parse、确实是数组、
+   里面却混着非对象元素」这一层没人管 —— `[null]` 就是这种值。
+   于是 `arr.map((r) => r.text)` 当场抛
+   `TypeError: Cannot read properties of null (reading 'text')`。
+   而这类读取点往往在**页面启动路径**上：一抛，后面整段初始化都不跑
+   （js/mine.js 的真实症状：收藏 / 浏览足迹 / 我的资料三块一起不渲染，
+   用户看到的只是「页面是空的」，完全不知道有一条本机数据坏了）。
+
+   【为什么这不是「假想的坏数据」】
+     · `JSON.stringify([undefined])` 的结果就是 `"[null]"`（JSON 规范行为），
+       数组里只要混进一个 undefined，落盘就变成 null；
+     · localStorage 是**跨版本、跨标签页、用户可手改**的持久状态 ——
+       代码可以升级，用户浏览器里那份旧值不会自己变干净；
+     · 同一个存储约定的写入端本来就在防这件事：js/detail.js 写浏览足迹时写的是
+       `list.filter((x) => x && x.id !== id)` —— 写的人知道可能有非对象元素，
+       读的人（js/mine.js）没跟上。
+
+   【返回形状】保留**原始下标** `raw`：调用方要靠它定位（删除按钮的 data-idx）。
+   如果把坏元素滤掉后重新编号，用户点的那条与真正删掉的那条就会错位 ——
+   那是修一个 Bug 送一个 Bug。 */
+function readJSONList(key, isItem) {
+  const raw = readJSON(key, []);
+  const out = [];
+  (Array.isArray(raw) ? raw : []).forEach((x, i) => {
+    let ok = false;
+    try { ok = !!isItem(x); } catch (e) { ok = false; }   // 判别器自己也不许把页面带崩
+    if (ok) out.push({ item: x, raw: i });
+  });
+  return out;
+}
+
 /** 用户可控文本拼进 HTML 之前必须转义（检索词、帖子标题与正文都走它） */
 function escHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => (

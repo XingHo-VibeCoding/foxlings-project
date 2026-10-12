@@ -127,10 +127,11 @@ function renderHistory() {
 
   if (DATA_STATE !== "ok") { box.innerHTML = ""; countEl.textContent = DATA_STATE === "error" ? "数据未就绪" : ""; return; }
 
-  const hist = readJSON(HIST_KEY, []);
-  const list = Array.isArray(hist)
-    ? hist.map((h) => ({ item: ITEMS.find((it) => it.id === h.id), at: h.at })).filter((x) => x.item)
-    : [];
+  // Day 24 修复：与「本机留底」同一处根因 —— 本地数组只判了「是不是数组」，
+  // 元素是 null 时 `h.id` 一样会抛。同一个存储约定的两个读取点一起补。
+  const list = readJSONList(HIST_KEY, (h) => h && typeof h === "object" && h.id)
+    .map((x) => ({ item: ITEMS.find((it) => it.id === x.item.id), at: x.item.at }))
+    .filter((x) => x.item);
 
   countEl.textContent = list.length ? "最近 " + list.length + " 条" : "";
 
@@ -460,7 +461,17 @@ async function loadReports() {
   MY_REPORTS = await api.getMyReports();
 }
 
-/** 列表行统一成 {text, at, cloud} —— 两种来源在界面上必须显示得出来 */
+/** 本机留底里的一条算什么形状：必须是对象，且文本是非空字符串。
+    见 data.js 的 readJSONList —— 判别器只回答「这条算不算数」，过滤由公共层做。 */
+function isLocalReport(r) {
+  return !!r && typeof r === "object" && typeof r.text === "string" && r.text.trim() !== "";
+}
+
+/** 列表行统一成 {text, at, cloud, raw} —— 两种来源在界面上必须显示得出来。
+    Day 24 修复：本地那一路改走 readJSONList（元素级校验）。
+    原来写的是 `local.map((r) => ({ text: r.text, ... }))`，只判了「是不是数组」，
+    数组里混进一个 null 就抛 TypeError，把整页启动带崩（复现与根因见 docs/day24-bugfix.md）。
+    raw = 这一条在原始数组里的下标，删除按钮要按它定位。 */
 function reportRows() {
   if (auth.isSignedIn()) {
     return MY_REPORTS.map((r) => ({
@@ -469,10 +480,12 @@ function reportRows() {
       cloud: true,
     }));
   }
-  const local = readJSON(REP_KEY, []);
-  return Array.isArray(local)
-    ? local.map((r) => ({ text: r.text, at: r.at, cloud: false }))
-    : [];
+  return readJSONList(REP_KEY, isLocalReport).map((x) => ({
+    text: x.item.text,
+    at: x.item.at,
+    cloud: false,
+    raw: x.raw,
+  }));
 }
 
 function renderReports() {
@@ -510,12 +523,15 @@ function renderReports() {
   rows.forEach((r, i) => {
     const row = document.createElement("div");
     row.className = "mine-item mine-report";
+    // 删除按钮用的下标必须是**原始数组**里的位置（r.raw），不是这里的渲染序号 i：
+    // 本机数组里可能夹着被滤掉的坏元素，用 i 会删错条（见 data.js 的 readJSONList）
+    const idx = typeof r.raw === "number" ? r.raw : i;
     // 线索是用户输入，一律转义后再拼（不能直接当 HTML 用）
     row.innerHTML = '<span class="mine-item-title">' + escHtml(r.text) + "</span>" +
       '<span class="mine-item-date">' + fmtTime(r.at) + "</span>" +
       (r.cloud
         ? ""
-        : '<button type="button" class="rep-del" data-idx="' + i + '" aria-label="删除这条本机记录">删除</button>');
+        : '<button type="button" class="rep-del" data-idx="' + idx + '" aria-label="删除这条本机记录">删除</button>');
     box.appendChild(row);
   });
 }
