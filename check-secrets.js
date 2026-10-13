@@ -249,4 +249,14 @@ function main() {
   process.exit(pass ? 0 : 1);
 }
 
-main();
+/* 直接运行时跑全套扫描；被 require 时（如发布前检查 preflight-check 要复用同一份红线规则，
+   或在**未跟踪文件**上补一遍同样的口径）只导出规则与工具函数，不执行、不退出。
+
+   为什么要有这个分叉：红线规则只能有一份定义。第二份抄在别处的那一刻起，
+   两份就会各自演化 —— 于是「check-secrets 说 0 条、另一个脚本说有 3 条」这种
+   谁也说不清的局面迟早出现。 */
+if (require.main === module) {
+  main();
+} else {
+  module.exports = { RED_LINES, ALLOW_LINES, TEXT_EXT, SKIP_DIR, listFiles, scanLine };
+}

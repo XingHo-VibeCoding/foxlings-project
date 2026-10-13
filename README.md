@@ -29,6 +29,21 @@ node check-secrets.js      # 密钥红线：命中 0 条才算过（含 .env.exa
 node check-boundaries.js   # 输入边界：数据库 CHECK 与前端的数字必须一致
 ```
 
+## 发布前跑这一条
+
+```bash
+node .workbuddy/skills/preflight-check/preflight-check.js
+
+# 留一份机器可读报告 / 连前端工艺门槛一起跑（需先起本地服务）
+node .workbuddy/skills/preflight-check/preflight-check.js --json preflight.json
+node .workbuddy/skills/preflight-check/preflight-check.js --with-browser
+```
+
+它把上面两条门槛串起来，再补上公网可达、`.env` 忽略是否真生效、工作区与远端是否就绪、
+线上是不是最新版——按 **红线 / 提醒 / 跳过** 三档给结论：红线全过 = `可发布`（退出码 0），
+任一红线失败 = `不可发布`（退出码 1）。用法与判据见
+`.workbuddy/skills/preflight-check/SKILL.md`。
+
 ## 约定与文档
 
 - `api-contract.md` —— 接口、数据表、RLS 闸门、错误口径、输入边界
