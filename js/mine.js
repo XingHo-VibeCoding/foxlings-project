@@ -591,7 +591,17 @@ function initReports() {
       if (!del) return;
       const arr = readJSON(REP_KEY, []);
       if (!Array.isArray(arr)) return;
-      arr.splice(Number(del.dataset.idx), 1);
+      // 下标来自 DOM（data-idx）—— 外部值，用前必须校验。
+      // 不校验的话：Number(undefined) = NaN，而 splice(NaN, 1) 等价于 splice(0, 1)，
+      // 会**静默删掉第一条**（用户点第 5 条，消失的却是第 1 条）。
+      const idx = safeIndex(del.dataset.idx, arr.length);
+      if (idx < 0) {
+        console.warn("[mine][bad-index] data-idx =", JSON.stringify(del.dataset.idx) +
+          " → 定位信息不可信，已忽略本次删除（不猜、不乱删）");
+        say("这条记录的定位信息不完整（页面可能是旧版），刷新后再试一次。", false);
+        return;
+      }
+      arr.splice(idx, 1);
       localStorage.setItem(REP_KEY, JSON.stringify(arr));
       renderReports();
     });

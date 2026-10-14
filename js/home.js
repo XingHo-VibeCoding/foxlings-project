@@ -249,7 +249,7 @@ function renderBoard() {
 
   if (!ALL_ITEMS.length) {
     renderListState(listEl, "empty", {
-      text: "暂无核查数据（data.json 为空，或全部条目未通过校验）",
+      text: "暂无核查数据（云端暂无条目，或全部条目未通过校验）",
     });
     updateSummary(0);
     return;

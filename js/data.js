@@ -167,15 +167,19 @@ function getIdFromUrl() {
 /* ============================================================
    Day 19：全站共用的小工具与本地存储键（做论坛时上移到公共层）
    来源：escHtml 原在 search.js、readJSON 与三个键名原在 mine.js / detail.js
-        各写一份。论坛（forum.js）要往同一个键里暂存线索、也要转义用户输入，
+        各写一份。论坛（forum.js）也要转义用户输入，
         故上移到三页都会加载的 data.js —— 「同一份数据只有一个定义」，
         将来接后端替换本地存储时也只改这一处。
+
+   Day 26 更正：原注释写「论坛（forum.js）要往同一个键里暂存线索」，与事实不符 ——
+        全仓引用 REP_KEY 的只有 mine.js 一个文件（`grep -rn "REP_KEY" js/` 可复现）。
+        不实的注释比没有注释更坏：它会让人以为动这个键要连带检查论坛。
    ============================================================ */
 
 /** 本地存储键（api-contract.md 第一节「本地存储」表的唯一实现） */
 const FAV_KEY = "fx_favs";        // 收藏的条目 id 列表（detail.js 写 / mine.js 读）
 const HIST_KEY = "fx_history";    // 浏览足迹 {id, at}[]（detail.js 写 / mine.js 读）
-const REP_KEY = "fx_myreports";   // 我提交的待核查线索 {text, at}[]（mine.js 与论坛共用）
+const REP_KEY = "fx_myreports";   // 我提交的待核查线索 {text, at}[]（只有 mine.js 读写：未登录时的本机留底）
 const VIEW_KEY = "fx_viewed";     // 已上报过浏览的条目 id 列表（detail.js 写，防止同一条被重复计数）
 const HIST_MAX = 20;              // 浏览足迹最多保留几条
 
@@ -220,6 +224,29 @@ function readJSONList(key, isItem) {
     if (ok) out.push({ item: x, raw: i });
   });
   return out;
+}
+
+/* ============================================================
+   Day 26 修复：DOM 上的下标同样不可信（readJSONList 那一族的第二个坑）
+
+   删除按钮把原始下标写在 `data-idx` 属性上，点删除时用
+   `Number(del.dataset.idx)` 取回来。这条路径上有两个失真点：
+     · 属性不存在（→ `Number(undefined)` = NaN；页面是旧版缓存时就是这样）；
+     · 用户按 F12 手改属性（→ 任意值）。
+   而 `arr.splice(NaN, 1)` 等价于 `splice(0, 1)` —— **静默删掉第一条**：
+   用户点的是第 5 条，消失的却是第 1 条，且没有任何报错。
+   和 Day 24 那个坑同源：不是数据坏了，是「谁都没校验这个值」。
+   ============================================================ */
+
+/** 把外部来的下标校验成数组里真实存在的下标；非法一律返回 -1，
+    调用方**必须显式处理**它 —— 绝不许静默兜底成 0（0 是合法的删除目标，
+    兜底成 0 等于替用户选了一条删）。
+    注意 `Number("")` 与 `Number(null)` 都是 0，所以不能只靠 Number() 判；
+    这里只认两种形态：真整数、纯数字字符串。 */
+function safeIndex(value, len) {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value < len) return value;
+  if (typeof value === "string" && /^\d+$/.test(value) && Number(value) < len) return Number(value);
+  return -1;
 }
 
 /** 用户可控文本拼进 HTML 之前必须转义（检索词、帖子标题与正文都走它） */
