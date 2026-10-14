@@ -170,9 +170,48 @@ const VERDICT_ALL = "all";
 const BOARD_RANGES = { day: 1, week: 7, month: 31, year: 365 };
 const RANGE_NAMES = { day: "今日", week: "本周", month: "本月", year: "今年" };
 
-let boardRange = "week";   // 当前时间档（默认周榜：一屏能看全，符合 PRD A1「5–10 张卡片」）
+const DEFAULT_BOARD_RANGE = "week"; // 默认档：周榜（一屏能看全，符合 PRD A1「5–10 张卡片」）
+
+let boardRange = DEFAULT_BOARD_RANGE; // 当前时间档
 let boardKeyword = "";     // 当前关键词
 let verdictFilter = VERDICT_ALL; // 当前结论筛选
+
+/*
+  首屏自动回落（Day 26，落地 PRD §八「若某天没更新，各档按最近更新日展示并标注日期」）
+
+  为什么必须有：默认档「周榜」这个约定，本身就把「第一屏」和「数据足够新」绑在了一起 ——
+  只要停更超过 7 天，新访客进门看到的必然是空榜。空态里虽然有「查看本月」的指路按钮，
+  但那是让用户自己找路；PRD 写的是「按最近更新日展示」。
+
+  三条约束，少一条就变成跟用户抢按钮：
+    ① 只在**没有筛选**时做 —— 用户已经用关键词/结论筛过，就别去动他的档位；
+    ② 只在**首屏第一次拿到数据**时做一次 —— boardRangeSettled 一旦为真就再不管；
+    ③ 只往**更长**的档位找 —— 数据是旧的，不存在往「日榜」回落的可能。
+*/
+let boardRangeSettled = false; // 档位是否已定：用户点过、或已自动回落过一次 → 之后不再自动改
+let boardFallbackNote = "";    // 首屏回落时给用户的口径说明（空串 = 没回落）
+
+/** 全站数据里最新的 updated_at —— 「按最近更新日展示」要标注的那个日期 */
+function latestUpdatedAt() {
+  let max = "";
+  ALL_ITEMS.forEach((it) => {
+    const d = String(it.updated_at || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > max) max = d; // ISO 日期串可直接比大小
+  });
+  return max || "日期未知";
+}
+
+/** 默认档为空时，落到「最近的、有条目的更长档位」；真的回落了才返回 true */
+function autoFallbackRange() {
+  if (boardKeyword.trim() || verdictFilter !== VERDICT_ALL) return false; // ①
+  if (getRangeItems(boardRange).length) return false;                     // 本档有条目，不用动
+  const longer = findLongerRange();                                       // ③
+  if (!longer) return false;                                              // 全都空：交给空态
+  boardRange = longer.key;
+  boardFallbackNote = "默认「" + RANGE_NAMES[DEFAULT_BOARD_RANGE] +
+    "」暂无新增，已按最近更新日（" + latestUpdatedAt() + "）展示";
+  return true;
+}
 
 /** updated_at 是否落在最近 days 天内（含今天） */
 function inRange(dateStr, days) {
@@ -216,6 +255,7 @@ function updateSummary(count) {
   const kw = boardKeyword.trim();
   if (kw) parts.push("关键词「" + kw + "」");
   el.textContent = RANGE_NAMES[boardRange] + "榜" +
+    (boardFallbackNote ? " · " + boardFallbackNote : "") +
     (parts.length ? " · 筛选 " + parts.join(" + ") : "") + "：共 " + count + " 条";
 }
 
@@ -245,6 +285,12 @@ function renderBoard() {
   if (stateGuard(listEl)) {
     if (summaryEl) summaryEl.textContent = DATA_STATE === "loading" ? "正在加载数据…" : "数据未就绪";
     return;
+  }
+
+  // 首屏自动回落：只做一次，且只在没有筛选时
+  if (!boardRangeSettled) {
+    boardRangeSettled = true;
+    if (autoFallbackRange()) highlightRangeTabs(); // 档位被改了，按钮高亮要跟着走
   }
 
   if (!ALL_ITEMS.length) {
@@ -327,13 +373,20 @@ function applyFilter(verdict) {
   renderBoard();
 }
 
+/** 同步时间档按钮的高亮（用户点击、首屏自动回落两条路径都要用） */
+function highlightRangeTabs() {
+  document.querySelectorAll("#board-tabs .tab").forEach((t) =>
+    t.classList.toggle("active", t.dataset.range === boardRange)
+  );
+}
+
 /** 应用时间档（含高亮同步） */
 function applyRange(range) {
   if (!BOARD_RANGES[range]) return;
   boardRange = range;
-  document.querySelectorAll("#board-tabs .tab").forEach((t) =>
-    t.classList.toggle("active", t.dataset.range === range)
-  );
+  boardRangeSettled = true; // 用户亲自点了：之后不再自动回落（不跟用户抢按钮）
+  boardFallbackNote = "";   // 换档等于重新提问，自动回落的说明随之作废
+  highlightRangeTabs();
   renderBoard();
 }
 

@@ -121,3 +121,18 @@
   `forum.*` 全 true：公告栏加在筛选器**之上**，不改变 `#forum-cats` / `#forum-search` 的作用域；
   `D2_无JS错误` true
 
+---
+
+## 2026-10-14 · Day 26：首页「首屏自动回落」
+
+- **被检查对象**：`js/home.js`（改动涉及辟谣榜筛选 —— 按 SKILL.md 的「改动涉及列表筛选时加跑」执行）
+- **Skill 自身变更**：无 —— 仍 **75** 项
+- **结果**：**本次跑不成（FAIL：`waitForSelector('#board-list .card')` 超时），未取得任何一项读数**
+- **原因不在代码（已定位到环境)**：诊断脚本 `verify/diag-filtercheck.js` 实测
+  `cdn.jsdelivr.net` → `ERR_CONNECTION_RESET`，`window.WorkBuddyCloud` 未加载，
+  页面自报「数据加载失败…过一会儿点「重试」」→ 榜单里没有卡片，脚本第一步就等不到。
+  同一分钟内 `frontend-rules` 也复现同一失败。
+- **结论口径**：**这次既不是 PASS 也不是「跳过」——是响亮地失败**（超时 + 退出码 1）。
+  比之前记 SKIP 强：SKIP 容易让人误以为「没事」，FAIL 会逼着人去看为什么不通过。
+- **待补**：等 CDN 通的那一刻复跑并补上读数（复跑前置检查见 `frontend-rules/run-log.md` 同日条目）。
+

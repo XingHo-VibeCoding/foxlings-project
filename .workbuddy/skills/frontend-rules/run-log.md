@@ -255,3 +255,29 @@
   `M1_溢出合计px` 仍 0（含 375px 窄屏下的公告栏）；`B1_hover位移px` 仍 `0 → -4`；
   `R0_无JS错误` true —— 公告栏是异步加载的，读失败也只收起整块，不拖累帖子列表
 
+---
+
+## 2026-10-14 · Day 26：首页「首屏自动回落」（PRD §八 落地）
+
+- **被检查对象**：`js/home.js` —— 新增 `DEFAULT_BOARD_RANGE` / `autoFallbackRange()` / `latestUpdatedAt()` /
+  `highlightRangeTabs()`，计数行拼上自动回落说明，`applyRange` 改为「用户点过就锁定」
+- **Skill 自身变更**：无 —— 硬门槛仍 **115**
+- **结果**：**一次 `ALL_PASS`（115 项硬门槛全过，23 项观察），随后三次复跑 FAIL**
+- **⚠️ 别把那次 ALL_PASS 读成「从此通过」**（本条目存在的意义就是防这个误读）：
+  - 15:55 那次通过**是真的**：`D1`/`N7`/`V4`（靶子 `20261005-02`：`31 → 32`，真写了一次线上浏览计数）都验到真数据。
+    **而它这次能跑完，恰好靠的就是本轮修复** —— 修之前默认周榜为空，脚本卡在等 `#board-list .card` 直接超时，
+    这也是这个门槛连续两轮跑不成的第二个原因（第一个原因是下面这条 CDN）。
+  - 15:56 / 15:59 / 16:00 **三次复跑全 FAIL 在同一步超时**，**原因不在代码**：诊断脚本实测
+    `cdn.jsdelivr.net` → `ERR_CONNECTION_RESET`，`window.WorkBuddyCloud` 没加载，
+    页面自报「数据加载失败…过一会儿点「重试」」，列表里当然没有 `.card`。
+  - **一点好消息**：这种失败是**响亮地失败**（超时 + 退出码 1），不是静默通过 —— 数据层一挂立刻报红，**没有假绿**。
+    （之前把这个门槛记成 SKIP 反而更危险：SKIP 容易让人以为「没事」。）
+- **复跑前置检查**（先确认 CDN 通不通，别把环境问题误判成回归）：
+  ```
+  node -e "fetch('https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js').then(r=>console.log('CDN',r.status)).catch(e=>console.log('CDN 不通:',e.message))"
+  ```
+- **留档**：`verify/frontendcheck-rerun.txt`（第 2 次失败原文）、`verify/frontendcheck-3rd.txt`（第 3 次）、
+  `verify/diag-filtercheck.js`（环境诊断脚本，能直接看到页面停在错误态）
+- **观察项里值得记的一笔**：`C7_实际用到的字号` 出现 `15 / 17 / 20`，与 C7 阶梯（12/13/14/16/18/22）不一致 ——
+  属既有偏差，非本轮引入，留在观察项里。
+
