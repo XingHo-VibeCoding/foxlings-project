@@ -54,8 +54,9 @@ node .workbuddy/skills/verify-project/verify-project.js --json verify.json
 
 | 文档 | 什么时候看 |
 |---|---|
-| `docs/release-v1.0.md` | 要发新版：发布前验证项、发布方式、发布后逐项验证、备份怎么做 |
-| `docs/rollback-manual.md` | 线上出事了：三层回退（代码 / 云函数 / 数据）+ 「什么情况必须回滚」判断表 |
+| `docs/release-v1.0.md` | 要发新版：发布前验证项、发布方式、发布后逐项验证、备份怎么做、**发布成立检测实测** |
+| `docs/rollback-manual.md` | 线上出事了：三层回退（代码 / 云函数 / 数据）+ 「什么情况必须回滚」判断表 + **手册可执行自检** |
+| `docs/rollback-drill-record.md` | 想看演练到底跑没跑：两次演练的**回滚前时刻 / 恢复公网可用时刻 / 总耗时**三个硬数据 |
 
 ```bash
 # 备份（发布前做；备份目录必须在仓库之外——发布会公开整个项目目录）
@@ -63,14 +64,24 @@ node db/export-data.js --out <仓库外目录> --label v1.0.0
 
 # 恢复：把备份还原成可执行的 SQL，再逐条送进云数据库
 node db/restore-from-backup.js --dir <备份目录>
+
+# 「线上现在跑的是哪一版」——逐字节比对 11 个页面资产（不依赖浏览器/CDN）
+node tools/check-live-version.js v1.0.0
+
+# 「数据有没有被碰」——三张表的行数 + 指纹（回滚前后各跑一次做对比）
+node tools/check-data-counts.js --tag 回滚前 --out 快照.json
+node tools/check-data-counts.js --tag 回滚后 --compare 快照.json
 ```
 
 ⚠️ 回滚只解决**代码**问题；数据被误删只能靠备份重新导入，两者是分开的两件事。
 备份能力边界（哪些表备不到）写在回滚手册 §二·第三层。
 
+> `tools/` 里的两个核验器**刻意放在仓库内**：回滚手册要求同伴也能照着跑，脚本路径一律相对自身定位，换任何克隆目录都能用（原来放在仓库外的工作区，同伴根本拿不到）。
+
 ## 约定与文档
 
 - `api-contract.md` —— 接口、数据表、RLS 闸门、错误口径、输入边界
 - `AGENTS.md` —— 项目内规范（提交纪律、门槛）
-- `docs/release-v1.0.md` / `docs/rollback-manual.md` —— 发布清单与回滚手册
+- `docs/release-v1.0.md` / `docs/rollback-manual.md` / `docs/rollback-drill-record.md` —— 发布清单 / 回滚手册 / 演练记录
+- `tools/` —— 线上版本核验器与数据完整性探针（回滚手册引用）
 - `docs/` —— 每日交付留档（含决策留痕与实测证据）
