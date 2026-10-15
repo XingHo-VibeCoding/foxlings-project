@@ -44,8 +44,33 @@ node .workbuddy/skills/preflight-check/preflight-check.js --with-browser
 任一红线失败 = `不可发布`（退出码 1）。用法与判据见
 `.workbuddy/skills/preflight-check/SKILL.md`。
 
+要连数据侧一起验（健康接口、六表、读写接口、越权写是否被挡），跑一键验收：
+
+```bash
+node .workbuddy/skills/verify-project/verify-project.js --json verify.json
+```
+
+## 发布 / 备份 / 回滚
+
+| 文档 | 什么时候看 |
+|---|---|
+| `docs/release-v1.0.md` | 要发新版：发布前验证项、发布方式、发布后逐项验证、备份怎么做 |
+| `docs/rollback-manual.md` | 线上出事了：三层回退（代码 / 云函数 / 数据）+ 「什么情况必须回滚」判断表 |
+
+```bash
+# 备份（发布前做；备份目录必须在仓库之外——发布会公开整个项目目录）
+node db/export-data.js --out <仓库外目录> --label v1.0.0
+
+# 恢复：把备份还原成可执行的 SQL，再逐条送进云数据库
+node db/restore-from-backup.js --dir <备份目录>
+```
+
+⚠️ 回滚只解决**代码**问题；数据被误删只能靠备份重新导入，两者是分开的两件事。
+备份能力边界（哪些表备不到）写在回滚手册 §二·第三层。
+
 ## 约定与文档
 
 - `api-contract.md` —— 接口、数据表、RLS 闸门、错误口径、输入边界
 - `AGENTS.md` —— 项目内规范（提交纪律、门槛）
+- `docs/release-v1.0.md` / `docs/rollback-manual.md` —— 发布清单与回滚手册
 - `docs/` —— 每日交付留档（含决策留痕与实测证据）
