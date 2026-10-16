@@ -58,8 +58,10 @@
     </div>
   </footer>
 
-  <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式） -->
+  <!-- 云服务 SDK（多来源兜底，详见 index.html 同位置注释与 docs/trial-report-day27.md） -->
   <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+  <script>window.WorkBuddyCloud||document.write('<script src="https://fastly.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"><\/script>');</script>
+  <script>window.WorkBuddyCloud||document.write('<script src="https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"><\/script>');</script>
   <!-- 公开配置 → 数据接口层 → 页面数据层，顺序不能换（后者依赖前者） -->
   <script src="js/cloud-config.js"></script>
   <script src="js/api.js"></script>

@@ -311,7 +311,8 @@ async function initDetail() {
     renderListState(head, "error", {
       // Day 25：原文案写的是「data.json 缺失」—— 那是 Day 20 之前的数据源，
       // 现在读的是云数据库，照着旧文案去排错只会把人带偏。
-      desc: "这条核查档案没能读出来，可能是网络不通，或数据服务暂时不可用。",
+      // Day 27：再把「可能是网络不通」去掉——真相多为本站依赖挂了，不能让用户替我们背锅。
+      desc: "这条核查档案没能读出来。可能是网络波动，也可能是本站依赖的服务没起来——不是你的操作有问题。",
       onRetry: initDetail,
     });
     return;

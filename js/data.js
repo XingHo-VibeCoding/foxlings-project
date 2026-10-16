@@ -67,6 +67,14 @@ async function loadVerifiedData() {
  *   desc        错误状态的补充说明
  *   onRetry     错误状态「重试」回调
  */
+/* 出错时的默认说明（Day 27）。
+   原句是「可能是网络不通，或数据服务暂时不可用」——
+   真相常常是**本站自己的依赖**挂了，却让用户怀疑自家网不好，然后关掉页面。
+   改成既不冤枉用户、也不假装一定都是站方问题的说法；文案统一收在这一处，
+   避免再一次出现「四处各自描述同一个错误」。 */
+const DEFAULT_ERROR_DESC =
+  "没能读到数据。可能是网络波动，也可能是本站依赖的服务没起来——不是你的操作有问题，过一会儿点「重试」。";
+
 function renderListState(container, state, opts) {
   opts = opts || {};
   const box = document.createElement("div");
@@ -80,7 +88,7 @@ function renderListState(container, state, opts) {
   } else if (state === "error") {
     box.innerHTML =
       '<strong class="state-title">数据加载失败</strong>' +
-      '<span class="state-desc">' + (opts.desc || "可能是网络不通，或数据服务暂时不可用——过一会儿点「重试」。") + "</span>" +
+      '<span class="state-desc">' + (opts.desc || DEFAULT_ERROR_DESC) + "</span>" +
       '<button type="button" class="empty-jump" data-state-act="retry">重试</button>';
   } else {
     let extra = "";

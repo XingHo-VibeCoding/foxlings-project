@@ -64,7 +64,16 @@ function getCloudClient() {
   }
   const S = window.WorkBuddyCloud;
   if (!S || typeof S.createWorkBuddyCloud !== "function") {
-    throw new Error("云服务 SDK 未加载（CDN 脚本没读到，或网络不通）");
+    /* Day 27 —— 这句话用户看得见，别再甩锅。
+       改之前页面把一切加载失败都说成「可能是网络不通，或数据服务暂时不可用」，
+       而真相是**本站自己**引的 SDK 挂了：陌生人的第一反应就是「这站坏了」，然后关掉。
+       所以这里明确归因到站点一侧，并保留可执行的下一步（刷新 / 告诉站方）。 */
+    const e = new Error(
+      "本站的数据模块没能加载（已尝试多个来源都不可达）。" +
+      "这是站点自己的问题，不是你的网络——过一会儿刷新重试；一直不行请告诉站方。"
+    );
+    e.code = "SDK_NOT_LOADED";
+    throw e;
   }
   __cloudClient = S.createWorkBuddyCloud({
     endpoint: window.CLOUD_CONFIG.endpoint,

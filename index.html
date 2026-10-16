@@ -306,8 +306,15 @@
     </div>
   </footer>
 
-  <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式） -->
+  <!-- 云服务 SDK（纯静态项目无构建步骤，按官方约定走 CDN 形式）
+       Day 27 改成多来源兜底，原因见 docs/trial-report-day27.md：
+       只写一个来源时，该域名一不可达，整站对陌生访客就是「数据加载失败」，
+       而页面还会把原因赖到「你的网络 / 数据服务」上（实际是本站自己的依赖挂了）。
+       按顺序尝试：第一个成功就装上全局，**后面的不会再下载**；
+       三个都不通时由 js/api.js 出专门文案，不再笼统说「网络不通」。 -->
   <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+  <script>window.WorkBuddyCloud||document.write('<script src="https://fastly.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"><\/script>');</script>
+  <script>window.WorkBuddyCloud||document.write('<script src="https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"><\/script>');</script>
   <!-- 公开配置 → 数据接口层 / AI 接口层 → 页面数据层 → 身份层，顺序不能换（后者依赖前者） -->
   <script src="js/cloud-config.js"></script>
   <script src="js/api.js"></script>

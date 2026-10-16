@@ -168,7 +168,9 @@ function renderForumView() {
       renderListState(box, "loading");
     } else {
       renderListState(box, "error", {
-        desc: "帖子列表没读到，可能是网络抖动。可以重试，或先去辟谣榜看看。",
+        // Day 27：去掉「可能是网络抖动」——同一份错误在各页面被描述成不同原因，
+        // 排查时就会被带偏；统一按「不归咎用户」的口径。
+        desc: "帖子列表没读到。可能是网络波动，也可能是本站依赖的服务没起来——不是你的操作有问题。可以重试，或先去辟谣榜看看。",
         onRetry: initForumData,
       });
     }
