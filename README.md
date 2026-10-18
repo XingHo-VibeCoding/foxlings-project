@@ -90,6 +90,7 @@ node tools/check-data-counts.js --tag 回滚后 --compare 快照.json
 | `docs/delivery-inventory-day28.md` | **结营验收清单**（附录 J 重建版）：16 项逐条给「当场怎么展示」，14 过 / 2 如实标记 |
 | `docs/day28-retro.md` | 结营复盘：28 天最大的认知改变 |
 | `docs/final-acceptance-day28.md` | **最终验收表**：8 项逐条 PASS/FAIL/未执行 + 当场证据 + 已知缺口 |
+| `docs/final-delivery-day28.md` | **结营交付清单**：公网地址 / 仓库 / 演示录屏 / 验收表与映射表 / 改写提示词 / 技术路线 / 资源说明 / 200 字总结 |
 | `docs/acceptance-8-checklist-day28.md` | 8 项交付清单一页速览（**由验收表解析生成**，改源文档后重跑脚本即同步，防两处漂移） |
 | `docs/day28-auditor-report.md` | **独立验收官核验报告**（不认识作者，只给公网地址与文档）：8 项复核 + 随机抽 3 项现场复验 + 6 处不一致 |
 | `docs/core-flow-twice-day28.md` | 核心流程**两遍**记录：写入→刷新→持久化→修改→删除，两遍逐项一致（「修改」两遍均未提供） |
