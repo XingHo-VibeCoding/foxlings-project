@@ -89,6 +89,11 @@ node tools/check-data-counts.js --tag 回滚后 --compare 快照.json
 | `docs/resources-and-expiry.md` | 「资源与到期说明」成品（不含任何密钥），每次复测往里填一行 |
 | `docs/delivery-inventory-day28.md` | **结营验收清单**（附录 J 重建版）：16 项逐条给「当场怎么展示」，14 过 / 2 如实标记 |
 | `docs/day28-retro.md` | 结营复盘：28 天最大的认知改变 |
+| `docs/final-acceptance-day28.md` | **最终验收表**：8 项逐条 PASS/FAIL/未执行 + 当场证据 + 已知缺口 |
+| `docs/demo-script-day28.md` | 结营演示提纲（3–5 分钟）：用户问题 / 核心流程 / 提示词改写 / 验证方式 / 平台限制 / 后续优化 |
+| `docs/delivery-brief-day28.md` | 交付说明：公网地址 / API 文档 / 数据库说明 / 部署清单 / **部署限制 6 条** |
+| `docs/demo-run-record-day28.md` | 按提纲真跑一次的留档（脚本生成，数字不手写） |
+| `docs/day28-status-and-next.md` | 已完成 / **未完成（如实标记）** / 结营后优化计划（真实数据源 / 注册登录 / 统计页） |
 
 试用链路固定为：**打开 → 看到核心数据 → 完成一次核心操作 → 刷新确认 → 修改 → 删除**。
 本项目的核心操作 = 提交一条待核查线索。
