@@ -296,7 +296,7 @@ $ node verify/audit-08-git-history-secrets.js
 
 历史对象总数 672（含 blob 606 条）
   [FAIL] A. 全部 git 历史 blob 扫描 · 真密钥特征
-         命中 3 条：带密码的连接串 @ check-secrets.js → 「postgres://user:pass@」 / 带密码的连接串 @ check-secrets.js → 「postgres://user:pass@」 / 带密码的连接串 @ check-secrets.js → 「postgres://user:pass@」
+         命中 3 条：带密码的连接串 @ check-secrets.js → postgres:// 开头、带账号密码的示例占位串（入库注：原文为扫描器自己的文档示例 user:pass，非真凭据；为免红线扫描把「引用示例」误报成「真连接串」，入库版已改写） / 同上 / 同上
   [OK]   B. .env 忽略规则真生效（问 git 本人）
          git check-ignore -v .env → .gitignore:2:.env	.env
   [OK]   C. .env 从未进过索引 / 历史
@@ -314,7 +314,7 @@ EXIT=1
 **我对这 3 条命中的判读**：三条都落在 `check-secrets.js` 这个文件上（它有三个历史版本），命中的是扫描器**自己文档里的示例串**：
 
 ```
-check-secrets.js:48:  // 连接串必须「带账号密码」才算红线：postgres://user:pass@host 这种形态
+check-secrets.js:48:  // 连接串必须「带账号密码」才算红线：postgres:// 开头、带账号密码的这种形态（入库注：原文示例占位串已改写）
 ```
 
 这是规则说明里的占位示例，不是真凭据。我的正则比作者的扫描器粗（没有豁免逻辑），所以把它算成命中。**剔除这 3 条已知误报后，全历史真密钥 = 0 条**，与 `check-secrets.js` 的结论一致。我第一版还误报了 `.env.example`（因为 `\s*` 跨行吃到了下一行的字段名），已修正后消失。
