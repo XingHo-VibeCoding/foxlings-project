@@ -1,6 +1,7 @@
 # 最终验收表（Day 28）
 
-> 站点：https://rumor-check-12000.app.workbuddy.host/　｜　版本：main `678f94e`
+> 站点：https://rumor-check-12000.app.workbuddy.host/　｜　核验时 HEAD：`678f94e`　｜　本文自 `60df8e4` 起入库（入库时代码未变，仅文档）
+> 独立复核：见 `docs/day28-auditor-report.md`（不认识作者的验收官独立核验，8 项全 PASS，并指出 6 处不一致 —— 本文已按其实测改正）
 > 核对时刻：**2026-10-18 22:5x（北京时间）**，下表每条证据都是**这一刻现场跑出来的**，不是昨天抄来的。
 >
 > 判定口径：只有三种结果 —— **PASS / FAIL / 未执行**。

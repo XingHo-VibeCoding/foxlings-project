@@ -90,6 +90,10 @@ node tools/check-data-counts.js --tag 回滚后 --compare 快照.json
 | `docs/delivery-inventory-day28.md` | **结营验收清单**（附录 J 重建版）：16 项逐条给「当场怎么展示」，14 过 / 2 如实标记 |
 | `docs/day28-retro.md` | 结营复盘：28 天最大的认知改变 |
 | `docs/final-acceptance-day28.md` | **最终验收表**：8 项逐条 PASS/FAIL/未执行 + 当场证据 + 已知缺口 |
+| `docs/acceptance-8-checklist-day28.md` | 8 项交付清单一页速览（**由验收表解析生成**，改源文档后重跑脚本即同步，防两处漂移） |
+| `docs/day28-auditor-report.md` | **独立验收官核验报告**（不认识作者，只给公网地址与文档）：8 项复核 + 随机抽 3 项现场复验 + 6 处不一致 |
+| `docs/core-flow-twice-day28.md` | 核心流程**两遍**记录：写入→刷新→持久化→修改→删除，两遍逐项一致（「修改」两遍均未提供） |
+| `docs/extensibility-qa-day28.md` | 「能继续改」问答记录：验收官独立给出加统计功能的动手路径，9 个行号经复核全部属实 |
 | `docs/demo-script-day28.md` | 结营演示提纲（3–5 分钟）：用户问题 / 核心流程 / 提示词改写 / 验证方式 / 平台限制 / 后续优化 |
 | `docs/delivery-brief-day28.md` | 交付说明：公网地址 / API 文档 / 数据库说明 / 部署清单 / **部署限制 6 条** |
 | `docs/demo-run-record-day28.md` | 按提纲真跑一次的留档（脚本生成，数字不手写） |
