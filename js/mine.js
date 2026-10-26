@@ -531,7 +531,8 @@ function renderReports() {
       '<span class="mine-item-date">' + fmtTime(r.at) + "</span>" +
       (r.cloud
         ? ""
-        : '<button type="button" class="rep-del" data-idx="' + idx + '" aria-label="删除这条本机记录">删除</button>');
+        : '<button type="button" class="rep-edit" data-idx="' + idx + '" aria-label="修改这条本机记录">修改</button>' +
+          '<button type="button" class="rep-del" data-idx="' + idx + '" aria-label="删除这条本机记录">删除</button>');
     box.appendChild(row);
   });
 }
@@ -604,6 +605,68 @@ function initReports() {
       arr.splice(idx, 1);
       localStorage.setItem(REP_KEY, JSON.stringify(arr));
       renderReports();
+    });
+
+    // 修改：只针对**本机留底**（云端线索没有 UPDATE 策略，产品不开放自行改）。
+    // Day 28 的 CRUD 两遍探针把「修改」记成「未提供」——这一步就是补它。
+    list.addEventListener("click", (e) => {
+      const btn = e.target.closest(".rep-edit");
+      if (!btn) return;
+      const arr = readJSON(REP_KEY, []);
+      if (!Array.isArray(arr)) return;
+      // 下标同样来自 DOM，必须校验（NaN 会让 splice/splice 类操作删错条）
+      const idx = safeIndex(btn.dataset.idx, arr.length);
+      if (idx < 0) {
+        say("这条记录的定位信息不完整（页面可能是旧版），刷新后再试一次。", false);
+        return;
+      }
+      const rowEl = btn.closest(".mine-item");
+      if (!rowEl) return;
+
+      const old = (arr[idx] && arr[idx].text) || "";
+      rowEl.innerHTML = "";
+      const ta = document.createElement("textarea");
+      ta.className = "rep-input rep-edit-input";
+      ta.maxLength = 500;
+      ta.value = old;
+      ta.setAttribute("aria-label", "修改这条线索的文字");
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "rep-save";
+      save.textContent = "保存";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "rep-cancel";
+      cancel.textContent = "取消";
+      rowEl.append(ta, save, cancel);
+      ta.focus();
+      say("改完点「保存」。只改这台设备上的留底。", true);
+
+      cancel.addEventListener("click", () => renderReports());
+      save.addEventListener("click", () => {
+        const text = ta.value.trim();
+        // 规则与提交、与数据库 CHECK 三处一致（5–500）
+        if (!text) { say("先写一句你看到的消息。", false); ta.focus(); return; }
+        if (text.length < 5) { say("再多写一点（至少 5 个字）：什么说法、在哪看到的。", false); ta.focus(); return; }
+        if (text.length > 500) { say("太长了，500 字以内。", false); ta.focus(); return; }
+        if (text === old) { say("内容没变，不用保存。", false); return; }
+
+        const cur = readJSON(REP_KEY, []);
+        if (!Array.isArray(cur) || !cur[idx]) {
+          say("这条记录已经不在了（可能在别的标签页删掉了），刷新看看。", false);
+          return;
+        }
+        cur[idx].text = text;
+        try {
+          localStorage.setItem(REP_KEY, JSON.stringify(cur));
+        } catch (err) {
+          // 存储失败必须说清楚，不能装作改好了
+          say("没存下来：浏览器本地存储写入失败（可能是隐私模式或空间满了）。", false);
+          return;
+        }
+        renderReports();
+        say("已改好（只改了这台设备上的留底）。", true);
+      });
     });
   }
 }

@@ -658,6 +658,21 @@ body {
   flex-shrink: 0; transition: background .25s, color .25s, border-color .25s;
 }
 .rep-del:hover { background: var(--c-fake-soft); color: var(--c-fake-deep); border-color: var(--c-fake); }
+/* 本机线索的「修改」：与删除同尺寸、同位置，避免手机上误触 */
+.rep-edit {
+  border: 1px solid var(--c-chip-border); background: var(--c-card); color: var(--c-muted);
+  font-size: 12px; padding: 6px 12px; border-radius: 12px; cursor: pointer; min-height: 36px;
+  flex-shrink: 0; margin-right: 6px; transition: background .25s, color .25s, border-color .25s;
+}
+.rep-edit:hover { background: var(--c-hover-bg); color: var(--c-primary); border-color: var(--c-primary); }
+.rep-edit-input { margin: 8px 0; }
+.rep-save, .rep-cancel {
+  border: 1px solid var(--c-chip-border); background: var(--c-card); color: var(--c-muted);
+  font-size: 12px; padding: 6px 12px; border-radius: 12px; cursor: pointer; min-height: 36px;
+  flex-shrink: 0; margin-right: 6px;
+}
+.rep-save { background: var(--c-primary); color: #fff; border-color: var(--c-primary); }
+.rep-cancel:hover { background: var(--c-hover-bg); }
 
 /* ---------- 登录面板（DOM 由 auth.js 生成，样式只在这里定义一处） ----------
    三个页面共用同一个面板：弹层挂在 body 上，不进任何页面的正文结构。 */
